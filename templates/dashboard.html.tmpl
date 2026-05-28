@@ -348,26 +348,26 @@ function renderCard(r, kind){
 
 // Single delegated click handler — robust to any name/quotes
 document.addEventListener('click', e=>{
+  // (a) action buttons inside cards
   const btn = e.target.closest('[data-act]');
-  if(!btn) return;
-  const card = btn.closest('.card');
-  if(!card) return;
-  const usid = card.dataset.usid;
-  const asid = card.dataset.asid;
-  const account = card.dataset.account;
-  const all = [].concat(...Object.values(data.buckets));
-  const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
-  const act = btn.dataset.act;
-  if(act==='reply' || act==='cancel') toggleReply(usid);
-  else if(act==='stage') stage(usid, r.name||'', account, asid);
-});
-
-// Click on user-ctx box to expand/collapse
-document.addEventListener('click', e=>{
+  if(btn){
+    const card = btn.closest('.card');
+    if(!card) return;
+    const usid = card.dataset.usid;
+    const asid = card.dataset.asid;
+    const account = card.dataset.account;
+    const all = [].concat(...Object.values(data.buckets));
+    const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
+    const act = btn.dataset.act;
+    if(act==='reply' || act==='cancel') toggleReply(usid);
+    else if(act==='stage') stage(usid, r.name||'', account, asid);
+    else if(act==='unstage') unstage(usid);
+    else if(act==='send') sendOne(usid, asid);
+    return;
+  }
+  // (b) clicking the user-ctx bubble toggles expand
   const ctx = e.target.closest('.md.user-ctx');
   if(ctx) ctx.classList.toggle('expanded');
-  else if(act==='unstage') unstage(usid);
-  else if(act==='send') sendOne(usid, asid);
 });
 
 function setSort(el){
@@ -483,22 +483,33 @@ function getPat(account){
   // 2. localStorage fallback for power users
   return localStorage.getItem('omnara_pat_'+account);
 }
+// Use the same-origin proxy mounted at /api/proxy/* (Cloudflare Pages Function).
+// Direct calls to api.omnara.com fail CORS preflight (it returns 400 + no Access-Control-Allow-Origin).
+const API_BASE = '/api/proxy/api/v1';
+
 async function postMessage(account, usid, asid, text){
   const pat = getPat(account);
   if(!pat){
     return {ok:false, error:'no_pat', cli:`omnara-mgr send ${usid} ${JSON.stringify(text)}  # @${account}`};
   }
   const body = JSON.stringify({text});
-  const r = await fetch(`https://api.omnara.com/api/v1/user-sessions/${usid}/agent-sessions/${asid}/messages`, {
-    method:'POST',
-    headers:{'Authorization':'Bearer '+pat,'Content-Type':'application/json'},
-    body
-  });
+  let r;
+  try{
+    r = await fetch(`${API_BASE}/user-sessions/${usid}/agent-sessions/${asid}/messages`, {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+pat,'Content-Type':'application/json'},
+      body
+    });
+  } catch(e){
+    return {ok:false, error:`network: ${e.message||e}`};
+  }
   if(r.ok){
     const j = await r.json();
     return {ok:true, message_id:j.message_id};
   }
-  return {ok:false, error:`HTTP ${r.status}`, body:await r.text()};
+  let errBody = '';
+  try{ errBody = await r.text(); }catch{}
+  return {ok:false, error:`HTTP ${r.status}`, body:errBody};
 }
 async function sendOne(usid, asidArg){
   let entry = staged.get(usid);
