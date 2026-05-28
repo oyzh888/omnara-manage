@@ -300,8 +300,10 @@ function renderCard(r, kind){
   const pinIcon = r.pinned ? '📌 ' : '';
   const cls = (r.pinned ? 'pinned ' : '') + kind;
 
+  // Use data-* attributes + event delegation; avoid inline string interpolation in onclick
+  // (which broke when names contained quotes)
   return `
-    <div class="card ${cls}" data-usid="${r.usid}" data-search="${esc(((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')+' '+(r.last_text||'')).toLowerCase())}">
+    <div class="card ${cls}" data-usid="${esc(r.usid)}" data-asid="${esc(r.asid||'')}" data-account="${esc(r.account||'personal')}" data-search="${esc(((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')+' '+(r.last_text||'')).toLowerCase())}">
       <div class="row1">
         <div class="nm">${pinIcon}${esc(r.name||'(unnamed)')}</div>
         ${acctTag}
@@ -310,29 +312,52 @@ function renderCard(r, kind){
         <span class="meta">${esc(r.age_str)} ago${branchHTML}</span>
       </div>
       ${summary}
-      <div class="md" id="md-${r.usid}">${md(r.last_text)}</div>
+      <div class="md" data-md="${esc(r.usid)}">${md(r.last_text)}</div>
       <div class="actions">
         <a class="btn primary" href="${url}" target="_blank">open ↗</a>
-        <button class="btn" onclick="toggleReply('${r.usid}')">💬 reply</button>
-        <button class="btn" onclick="document.getElementById('md-${r.usid}').classList.toggle('expanded');this.textContent=this.textContent.includes('full')?'show less':'show full';">show full</button>
+        <button class="btn" data-act="reply">💬 reply</button>
+        <button class="btn" data-act="expand">show full</button>
         <div class="hits">${hits}</div>
       </div>
-      <div class="reply ${isStaged?'open staged':''}" id="reply-${r.usid}">
-        <textarea id="ta-${r.usid}" placeholder="Your reply (will be sent as Steve, prefixed with [from omnara-manage])">${isStaged?esc(staged.get(r.usid).text):''}</textarea>
+      <div class="reply ${isStaged?'open staged':''}" data-reply="${esc(r.usid)}">
+        <textarea data-ta="${esc(r.usid)}" placeholder="Your reply (will be sent as Steve, prefixed with [from omnara-manage])">${isStaged?esc(staged.get(r.usid).text):''}</textarea>
         <div class="row">
           ${isStaged
             ? `<span class="tag" style="background:#22c55e22;color:var(--ok);">✅ staged</span>
-               <button class="btn" onclick="unstage('${r.usid}')">unstage</button>
-               <button class="btn primary" onclick="sendOne('${r.usid}')">send now</button>`
-            : `<button class="btn primary" onclick="stage('${r.usid}','${esc((r.name||'').replace(/'/g,'\\\\\\''))}','${r.account||'personal'}','${r.asid}')">📥 stage</button>
-               <button class="btn success" onclick="sendOne('${r.usid}','${r.asid}')">⚡ send now</button>
-               <button class="btn" onclick="toggleReply('${r.usid}')">cancel</button>`
+               <button class="btn" data-act="unstage">unstage</button>
+               <button class="btn primary" data-act="send">send now</button>`
+            : `<button class="btn primary" data-act="stage">📥 stage</button>
+               <button class="btn success" data-act="send">⚡ send now</button>
+               <button class="btn" data-act="cancel">cancel</button>`
           }
           <span class="hint">cmd/ctrl+enter to stage</span>
         </div>
       </div>
     </div>`;
 }
+
+// Single delegated click handler — robust to any name/quotes
+document.addEventListener('click', e=>{
+  const btn = e.target.closest('[data-act]');
+  if(!btn) return;
+  const card = btn.closest('.card');
+  if(!card) return;
+  const usid = card.dataset.usid;
+  const asid = card.dataset.asid;
+  const account = card.dataset.account;
+  const all = [].concat(...Object.values(data.buckets));
+  const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
+  const act = btn.dataset.act;
+  if(act==='reply' || act==='cancel') toggleReply(usid);
+  else if(act==='expand'){
+    const md = card.querySelector('[data-md]');
+    md.classList.toggle('expanded');
+    btn.textContent = md.classList.contains('expanded') ? 'show less' : 'show full';
+  }
+  else if(act==='stage') stage(usid, r.name||'', account, asid);
+  else if(act==='unstage') unstage(usid);
+  else if(act==='send') sendOne(usid, asid);
+});
 
 function setSort(el){
   document.querySelectorAll('.sort-pill').forEach(p=>p.classList.remove('active'));
@@ -355,8 +380,9 @@ function renderAcctBar(){
     const lbl = a.error
       ? `<span style="color:var(--err)">err</span>`
       : `(${a.total_sessions}, L${a.counts.likely_question})`;
-    return `<div class="acct-pill ${on?'active':'dim'}" onclick="toggleAcct('${a.account}')">@${a.account} ${lbl}</div>`;
+    return `<div class="acct-pill ${on?'active':'dim'}" data-acct="${esc(a.account)}">@${esc(a.account)} ${lbl}</div>`;
   }).join('');
+  bar.querySelectorAll('[data-acct]').forEach(el=>el.onclick=()=>toggleAcct(el.dataset.acct));
 }
 function toggleAcct(name){
   if(activeAccounts.has(name)) activeAccounts.delete(name);
@@ -399,15 +425,21 @@ function render(){
 }
 
 // ----- staging / batch -----
+function $reply(usid){ return document.querySelector(`[data-reply="${CSS.escape(usid)}"]`); }
+function $ta(usid){ return document.querySelector(`[data-ta="${CSS.escape(usid)}"]`); }
+
 function toggleReply(usid){
-  const el = document.getElementById('reply-'+usid);
+  const el = $reply(usid);
+  if(!el) return;
   el.classList.toggle('open');
   if(el.classList.contains('open')){
-    setTimeout(()=>document.getElementById('ta-'+usid).focus(), 50);
+    setTimeout(()=>{ const ta=$ta(usid); if(ta) ta.focus(); }, 50);
   }
 }
 function stage(usid,name,account,asid){
-  const text = document.getElementById('ta-'+usid).value.trim();
+  const ta = $ta(usid);
+  if(!ta){ flash('reply box not found'); return; }
+  const text = ta.value.trim();
   if(!text){ flash('write something first'); return; }
   staged.set(usid, {usid, asid, name, account, text});
   render();
@@ -457,11 +489,8 @@ async function postMessage(account, usid, asid, text){
 async function sendOne(usid, asidArg){
   let entry = staged.get(usid);
   if(!entry){
-    // staging on the fly from the textarea
-    const ta = document.getElementById('ta-'+usid);
+    const ta = $ta(usid);
     if(!ta || !ta.value.trim()){ flash('empty'); return; }
-    const card = ta.closest('.card');
-    // Need account+asid; extract from data
     const all = [].concat(...Object.values(data.buckets));
     const r = all.find(x=>x.usid===usid);
     if(!r){ flash('row not found'); return; }
@@ -536,8 +565,8 @@ function flash(msg){
 document.addEventListener('keydown', e=>{
   if((e.metaKey||e.ctrlKey) && e.key==='Enter'){
     const ta = document.activeElement;
-    if(ta && ta.tagName==='TEXTAREA' && ta.id.startsWith('ta-')){
-      const usid = ta.id.slice(3);
+    if(ta && ta.tagName==='TEXTAREA' && ta.dataset.ta){
+      const usid = ta.dataset.ta;
       const card = ta.closest('.card');
       const all = [].concat(...Object.values(data.buckets));
       const r = all.find(x=>x.usid===usid);
