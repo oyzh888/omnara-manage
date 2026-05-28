@@ -109,29 +109,38 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
             return None
 
     # Peek last messages — grab BOTH the most recent agent reply AND the prior user message,
-    # full text (no truncation), so Steve has the question + the context he asked.
+    # full text (no truncation). Pages backward through history if needed (some sessions have
+    # 50+ tool_call/tool_result frames between Steve's prompt and the agent's final reply).
     last_text = None
     last_sender = None
     prev_user_text = None
     try:
-        # API returns oldest-first inside one page (newest at end).
-        # Pull a healthy window so we can grab last user + last agent text reliably.
-        msgs = c.get_messages(summary["usid"], summary["asid"], limit=max(peek_limit, 30))
-        for m in reversed(msgs):
-            content = (m.get("payload") or {}).get("content") or {}
-            if content.get("type") != "text":
-                continue
-            text = (content.get("text") or "").strip()
-            if not text:
-                continue
-            sender = (m.get("sender") or {}).get("kind")
-            if last_text is None:
-                last_text = content["text"]
-                last_sender = sender
-                continue
-            # Looking for the prior USER message (the one that prompted the agent's last reply)
-            if prev_user_text is None and sender == "user":
-                prev_user_text = content["text"]
+        # API returns ascending-by-created_at within a page; page size 200; before_id pagination.
+        # Walk pages backward up to 5 pages (1000 messages) until we find both a user msg and an agent text.
+        before_id = None
+        for _page in range(5):
+            page = c.get_messages(summary["usid"], summary["asid"], limit=200, before_id=before_id)
+            if not page:
+                break
+            for m in reversed(page):
+                content = (m.get("payload") or {}).get("content") or {}
+                if content.get("type") != "text":
+                    continue
+                text = (content.get("text") or "").strip()
+                if not text:
+                    continue
+                sender = (m.get("sender") or {}).get("kind")
+                if last_text is None:
+                    last_text = content["text"]
+                    last_sender = sender
+                    continue
+                if prev_user_text is None and sender == "user":
+                    prev_user_text = content["text"]
+                    break
+            if prev_user_text is not None or len(page) < 200:
+                break  # found context, or hit start of conversation
+            before_id = page[0].get("message_id")
+            if not before_id:
                 break
     except Exception:
         pass

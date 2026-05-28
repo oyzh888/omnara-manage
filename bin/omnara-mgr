@@ -193,6 +193,14 @@ def cmd_sync(c: OmnaraClient, args):
     print(f"🔍 triaging {len(clients)} accounts: {[c.alias for c in clients]}")
     data = triage_mod.triage_multi(clients)
 
+    # Will embed PATs after writing the JSON snapshot (so committed file never sees PATs).
+    embedded_pats = None
+    if args.embed_pats:
+        from omnara_client import load_accounts
+        accs = load_accounts()
+        embedded_pats = {a["alias"]: a["pat"] for a in accs}
+        print(f"🔓 will embed {len(accs)} PATs into the rendered HTML only (not committed JSON)")
+
     # Optional: LLM summaries
     if args.summarize:
         if not summarize_mod._has_api_key():
@@ -210,8 +218,11 @@ def cmd_sync(c: OmnaraClient, args):
     latest_path.write_text(json.dumps(data, indent=2, default=str))
     print(f"📝 wrote {snap_path.relative_to(repo_dir)} and data/latest.json")
 
-    # Render dashboard HTML
-    html = _render_triage_html(data, multi=True)
+    # Render dashboard HTML — only the HTML version carries the PATs (if requested)
+    data_for_html = dict(data)
+    if embedded_pats:
+        data_for_html["_embedded_pats"] = embedded_pats
+    html = _render_triage_html(data_for_html, multi=True)
     (site_dir / "index.html").write_text(html)
     # Mirror data/ into site/data/ as actual files (wrangler doesn't follow symlinks)
     site_data = site_dir / "data"
@@ -356,6 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
     psy.add_argument("--no-git", action="store_true", help="skip git commit/push")
     psy.add_argument("--summarize", action="store_true", help="add LLM one-liner summaries (needs ANTHROPIC_API_KEY)")
     psy.add_argument("--summarize-top", type=int, default=8, help="how many cards per bucket to summarize")
+    psy.add_argument("--embed-pats", action="store_true", help="embed all configured PATs into the page so browser can send messages directly. Only safe on private hosting.")
 
     pse = sp.add_parser("send", help="send a message into an existing session")
     pse.add_argument("usid")

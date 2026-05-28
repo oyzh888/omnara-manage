@@ -191,9 +191,11 @@ footer{margin-top:24px;padding:14px 0;border-top:1px solid var(--border);color:v
   <span class="view-pill" data-view="compact" onclick="setView(this)">compact</span>
 </div>
 
-<div class="legend">
-  <strong>Batch reply mode:</strong> click <code>reply</code> on any card, type your answer, click <code>stage</code> (don't send yet). Repeat across many cards. Then click <strong>📤 Send all staged</strong> at the bottom — every reply fires in parallel via the Omnara API.
-  Or, after staging, click <strong>📋 Copy as command</strong> to copy a one-liner Steve can paste into a Claude session ("here's my batch feedback, fire it off").
+<div class="legend" id="legend">
+  <strong>Batch reply mode:</strong> click <code>reply</code> on any card, type your answer, <code>stage</code>. Repeat across many cards.
+  Then click <strong>📤 Send all</strong> — every reply fires in parallel against the Omnara API.
+  Or click <strong>📋 Copy as command</strong> to grab a shell block to paste elsewhere.
+  <span id="patStatus" style="margin-left:8px;"></span>
 </div>
 
 <h2>🚨 Urgent <span class="count" id="cnt-urgent"></span></h2>
@@ -476,6 +478,9 @@ function updateBatchBar(){
 //     we call POST /api/v1/user-sessions/{usid}/agent-sessions/{asid}/messages directly.
 // (2) Fallback: print a curl/CLI block and ask Steve to run it.
 function getPat(account){
+  // 1. embedded by sync --embed-pats (preferred — zero setup)
+  if(data._embedded_pats && data._embedded_pats[account]) return data._embedded_pats[account];
+  // 2. localStorage fallback for power users
   return localStorage.getItem('omnara_pat_'+account);
 }
 async function postMessage(account, usid, asid, text){
@@ -592,6 +597,19 @@ document.getElementById('machines').innerHTML = ms.map(m=>{
   const flag = m.status==='ONLINE' ? '🟢' : '⚫';
   return `<div class="machine ${cls}"><div class="h">${flag} ${esc(m.hostname||'?')}</div><div class="s">daemon ${m.daemon_version||'?'} · ${(m.last_seen_at||'?').slice(0,19)}</div></div>`;
 }).join('');
+
+// PAT status indicator
+(function(){
+  const el = document.getElementById('patStatus');
+  if(!el) return;
+  const haveEmbed = !!(data._embedded_pats && Object.keys(data._embedded_pats).length);
+  if(haveEmbed){
+    const accs = Object.keys(data._embedded_pats);
+    el.innerHTML = `<span class="tag" style="background:#22c55e22;color:var(--ok)">🔓 PAT embedded · direct send ON (${accs.map(a=>'@'+a).join(', ')})</span>`;
+  } else {
+    el.innerHTML = `<span class="tag" style="background:#fbbf2422;color:var(--warn)">PAT not embedded — Send All will produce a CLI block. Run <code>omnara-mgr sync --embed-pats</code> for direct send.</span>`;
+  }
+})();
 
 renderAcctBar();
 render();
