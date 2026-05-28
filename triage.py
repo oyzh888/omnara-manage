@@ -1,10 +1,12 @@
 """triage.py — score Omnara sessions by "is this waiting on Steve?"
 
 Pure functions over an OmnaraClient. Outputs the bucket structure that triage.html.tmpl renders.
+Message fetching parallelized via ThreadPoolExecutor.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -86,21 +88,25 @@ def _age_min(iso: Optional[str], now: datetime) -> Optional[float]:
 
 
 def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) -> Optional[dict]:
-    """Returns a triage record or None if session is too stale / disconnected to bother."""
+    """Returns a triage record or None if session is too stale / disconnected to bother.
+    Pinned sessions are NEVER filtered out by age — Steve pinned them on purpose.
+    """
     if not s.get("agent_sessions"):
         return None
     summary = c.session_summary(s)
     work = summary["work_status"]
     conn = summary["connection_status"]
     age = _age_min(summary["last_msg"] or summary["created_at"], now)
+    pinned = bool(summary.get("pinned"))
 
-    # Drop very old or actively disconnected ones to keep triage page focused
-    if work == "WORKING":
-        return None
-    if conn == "DISCONNECTED" and (age is None or age > 60 * 24 * 2):
-        return None
-    if age is None or age > 60 * 48:
-        return None
+    # Filtering: pinned bypasses all age/disconnect filters.
+    if not pinned:
+        if work == "WORKING":
+            return None
+        if conn == "DISCONNECTED" and (age is None or age > 60 * 24 * 7):
+            return None
+        if age is None or age > 60 * 24 * 7:  # was 48h, now 7d for non-pinned
+            return None
 
     # Peek last messages
     last_text = None
@@ -117,7 +123,12 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
         pass
 
     if not last_text:
-        return None
+        # Pinned session with no readable text yet — keep a stub so it shows up
+        if pinned:
+            last_text = "(no text yet — open in dashboard to see content)"
+            last_sender = "agent_session"
+        else:
+            return None
 
     base = 0
     if work == "AWAITING_INPUT":
@@ -174,7 +185,7 @@ def bucket_of(rec: dict) -> str:
     return "idle"
 
 
-def triage(c: OmnaraClient) -> dict[str, Any]:
+def triage(c: OmnaraClient, max_workers: int = 16) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     sessions = c.list_sessions()
     machines = {"machines": c.machines()}
@@ -186,12 +197,19 @@ def triage(c: OmnaraClient) -> dict[str, Any]:
         "agent_should_respond": [],
         "idle": [],
     }
-    for s in sessions:
-        rec = score_session(c, s, now)
-        if rec is None:
-            continue
-        rec["account"] = c.alias  # so multi-account triage knows which account a card is from
-        buckets[bucket_of(rec)].append(rec)
+
+    def _score(s):
+        try:
+            return score_session(c, s, now)
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for rec in ex.map(_score, sessions):
+            if rec is None:
+                continue
+            rec["account"] = c.alias
+            buckets[bucket_of(rec)].append(rec)
 
     for k in buckets:
         buckets[k].sort(key=lambda r: -r["score"])
@@ -205,8 +223,8 @@ def triage(c: OmnaraClient) -> dict[str, Any]:
     }
 
 
-def triage_multi(clients: list[OmnaraClient]) -> dict[str, Any]:
-    """Run triage across multiple accounts and merge into one bucketed view."""
+def triage_multi(clients: list[OmnaraClient], max_workers: int = 16) -> dict[str, Any]:
+    """Run triage across multiple accounts in parallel, merge into one bucketed view."""
     now = datetime.now(timezone.utc)
     merged: dict[str, list[dict]] = {
         "awaiting": [],
@@ -218,23 +236,31 @@ def triage_multi(clients: list[OmnaraClient]) -> dict[str, Any]:
     per_account = []
     all_machines = []
     total_sessions = 0
-    for c in clients:
-        try:
-            d = triage(c)
-        except Exception as e:
-            per_account.append({"account": c.alias, "error": str(e)})
-            continue
-        per_account.append({
-            "account": c.alias,
-            "total_sessions": d["total_sessions"],
-            "counts": {k: len(v) for k, v in d["buckets"].items()},
-        })
-        all_machines.extend(d["machines"]["machines"])
-        total_sessions += d["total_sessions"]
-        for k, v in d["buckets"].items():
-            merged[k].extend(v)
+
+    # Run accounts in parallel — each one already parallelizes internally
+    with ThreadPoolExecutor(max_workers=len(clients) or 1) as ex:
+        futures = {ex.submit(triage, c, max_workers): c for c in clients}
+        for fut in as_completed(futures):
+            c = futures[fut]
+            try:
+                d = fut.result()
+            except Exception as e:
+                per_account.append({"account": c.alias, "error": str(e)})
+                continue
+            per_account.append({
+                "account": c.alias,
+                "total_sessions": d["total_sessions"],
+                "counts": {k: len(v) for k, v in d["buckets"].items()},
+            })
+            all_machines.extend(d["machines"]["machines"])
+            total_sessions += d["total_sessions"]
+            for k, v in d["buckets"].items():
+                merged[k].extend(v)
+
     for k in merged:
         merged[k].sort(key=lambda r: -r["score"])
+    # Stable account ordering for UI
+    per_account.sort(key=lambda x: x.get("account", ""))
     return {
         "snapshot_at": now.isoformat(),
         "accounts": per_account,
