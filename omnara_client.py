@@ -31,7 +31,35 @@ from typing import Any, Optional
 
 DEFAULT_BASE = "https://api.omnara.com"
 DEFAULT_CREDS = os.path.expanduser("~/.omnara/creds.json")
-DEFAULT_UA = "omnara-manage/0.1 (+https://github.com/oyzh888/omnara-manage)"
+DEFAULT_UA = "omnara-manage/0.2 (+https://github.com/oyzh888/omnara-manage)"
+DEFAULT_ACCOUNTS = os.path.expanduser("~/.config/omnara-manage/accounts.json")
+
+
+def load_accounts(path: str = DEFAULT_ACCOUNTS) -> list[dict]:
+    """Load multi-account config. Each entry: {alias, email, user_id, pat_source|pat_inline, tag_color}.
+
+    Falls back to a single 'personal' account from ~/.omnara/creds.json if config missing.
+    Never commit accounts.json — keep at chmod 600 in ~/.config/omnara-manage/.
+    """
+    if os.path.exists(path):
+        with open(path) as f:
+            cfg = json.load(f)
+        out = []
+        for a in cfg.get("accounts", []):
+            pat = a.get("pat_inline")
+            if not pat and a.get("pat_source"):
+                src = os.path.expanduser(a["pat_source"])
+                if os.path.exists(src):
+                    pat = json.load(open(src)).get("pat")
+            if pat:
+                out.append({**a, "pat": pat})
+        return out
+    # Fallback: single account from default creds
+    if os.path.exists(DEFAULT_CREDS):
+        pat = json.load(open(DEFAULT_CREDS)).get("pat")
+        if pat:
+            return [{"alias": "personal", "email": "?", "user_id": "?", "pat": pat, "tag_color": "#7dd3fc"}]
+    return []
 
 
 class OmnaraError(RuntimeError):
@@ -51,6 +79,7 @@ class OmnaraClient:
         creds_path: str = DEFAULT_CREDS,
         user_agent: str = DEFAULT_UA,
         timeout: float = 30.0,
+        alias: Optional[str] = None,
     ):
         if pat is None:
             pat = os.environ.get("OMNARA_PAT")
@@ -66,6 +95,17 @@ class OmnaraClient:
         self.base = base_url.rstrip("/")
         self.user_agent = user_agent
         self.timeout = timeout
+        self.alias = alias or "personal"
+
+    @classmethod
+    def for_account(cls, account: dict) -> "OmnaraClient":
+        """Build a client from a load_accounts() entry."""
+        return cls(pat=account["pat"], alias=account.get("alias", "?"))
+
+    @classmethod
+    def all_accounts(cls) -> list["OmnaraClient"]:
+        """Yield one client per configured account."""
+        return [cls.for_account(a) for a in load_accounts()]
 
     # ---------- low-level ----------
 

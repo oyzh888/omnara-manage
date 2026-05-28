@@ -183,6 +183,7 @@ def triage(c: OmnaraClient) -> dict[str, Any]:
         rec = score_session(c, s, now)
         if rec is None:
             continue
+        rec["account"] = c.alias  # so multi-account triage knows which account a card is from
         buckets[bucket_of(rec)].append(rec)
 
     for k in buckets:
@@ -190,7 +191,47 @@ def triage(c: OmnaraClient) -> dict[str, Any]:
 
     return {
         "snapshot_at": now.isoformat(),
+        "account": c.alias,
         "machines": machines,
         "total_sessions": len(sessions),
         "buckets": buckets,
+    }
+
+
+def triage_multi(clients: list[OmnaraClient]) -> dict[str, Any]:
+    """Run triage across multiple accounts and merge into one bucketed view."""
+    now = datetime.now(timezone.utc)
+    merged: dict[str, list[dict]] = {
+        "awaiting": [],
+        "likely_question": [],
+        "maybe_question": [],
+        "agent_should_respond": [],
+        "idle": [],
+    }
+    per_account = []
+    all_machines = []
+    total_sessions = 0
+    for c in clients:
+        try:
+            d = triage(c)
+        except Exception as e:
+            per_account.append({"account": c.alias, "error": str(e)})
+            continue
+        per_account.append({
+            "account": c.alias,
+            "total_sessions": d["total_sessions"],
+            "counts": {k: len(v) for k, v in d["buckets"].items()},
+        })
+        all_machines.extend(d["machines"]["machines"])
+        total_sessions += d["total_sessions"]
+        for k, v in d["buckets"].items():
+            merged[k].extend(v)
+    for k in merged:
+        merged[k].sort(key=lambda r: -r["score"])
+    return {
+        "snapshot_at": now.isoformat(),
+        "accounts": per_account,
+        "total_sessions": total_sessions,
+        "machines": {"machines": all_machines},
+        "buckets": merged,
     }

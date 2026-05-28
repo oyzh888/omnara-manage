@@ -33,8 +33,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
-from omnara_client import OmnaraClient, OmnaraError  # noqa: E402
+from omnara_client import OmnaraClient, OmnaraError, load_accounts  # noqa: E402
 import triage as triage_mod  # noqa: E402
+import summarize as summarize_mod  # noqa: E402
 
 
 # ---------- helpers ----------
@@ -161,13 +162,118 @@ def cmd_raw(c: OmnaraClient, args):
 
 # ---------- triage ----------
 
-def _render_triage_html(data: dict) -> str:
-    tmpl_path = HERE / "templates" / "triage.html.tmpl"
+def _render_triage_html(data: dict, multi: bool = False) -> str:
+    name = "dashboard.html.tmpl" if multi else "triage.html.tmpl"
+    tmpl_path = HERE / "templates" / name
     return tmpl_path.read_text().replace("__DATA__", json.dumps(data, default=str))
 
 
+def cmd_sync(c: OmnaraClient, args):
+    """End-to-end multi-account triage → write to a tracking repo (clone if needed) →
+    git commit + push → optional CF Pages deploy.
+    """
+    repo_dir = Path(args.repo_dir).expanduser().resolve()
+    if not repo_dir.exists():
+        if not args.repo_url:
+            print(f"⚠️  {repo_dir} does not exist and no --repo-url given", file=sys.stderr)
+            sys.exit(2)
+        print(f"📥 cloning {args.repo_url} → {repo_dir} ...")
+        subprocess.run(["git", "clone", args.repo_url, str(repo_dir)], check=True)
+
+    site_dir = repo_dir / "site"
+    data_dir = repo_dir / "data"
+    site_dir.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collect triage across all accounts
+    clients = OmnaraClient.all_accounts()
+    if not clients:
+        print("⚠️  no accounts configured", file=sys.stderr)
+        sys.exit(2)
+    print(f"🔍 triaging {len(clients)} accounts: {[c.alias for c in clients]}")
+    data = triage_mod.triage_multi(clients)
+
+    # Optional: LLM summaries
+    if args.summarize:
+        if not summarize_mod._has_api_key():
+            print("⚠️  --summarize set but ANTHROPIC_API_KEY not in env — skipping", file=sys.stderr)
+        else:
+            print(f"💡 annotating top {args.summarize_top} per bucket with Haiku summaries...")
+            summarize_mod.annotate_buckets(data, max_per_bucket=args.summarize_top)
+
+    # Write JSON snapshot (timestamped + latest)
+    from datetime import datetime
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    snap_path = data_dir / f"{ts}.json"
+    latest_path = data_dir / "latest.json"
+    snap_path.write_text(json.dumps(data, indent=2, default=str))
+    latest_path.write_text(json.dumps(data, indent=2, default=str))
+    print(f"📝 wrote {snap_path.relative_to(repo_dir)} and data/latest.json")
+
+    # Render dashboard HTML
+    html = _render_triage_html(data, multi=True)
+    (site_dir / "index.html").write_text(html)
+    # Mirror data/ into site/data/ as actual files (wrangler doesn't follow symlinks)
+    site_data = site_dir / "data"
+    if site_data.is_symlink() or site_data.exists():
+        if site_data.is_symlink():
+            site_data.unlink()
+        else:
+            shutil.rmtree(site_data)
+    shutil.copytree(data_dir, site_data)
+    print(f"📄 rendered site/index.html  ({(site_dir/'index.html').stat().st_size} bytes)")
+
+    # Git commit + push
+    if not args.no_git:
+        msg = f"sync: triage snapshot {ts} ({sum(len(v) for v in data['buckets'].values())} active across {len(clients)} accounts)"
+        for cmd in [
+            ["git", "-C", str(repo_dir), "add", "-A"],
+            ["git", "-C", str(repo_dir), "-c", "user.email=oyzh888@users.noreply.github.com",
+             "-c", "user.name=oyzh888",
+             "commit", "-m", msg, "--allow-empty"],
+            ["git", "-C", str(repo_dir), "push"],
+        ]:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
+                print(f"⚠️  {' '.join(cmd[:4])} failed: {r.stderr.strip()[:200]}", file=sys.stderr)
+        print("📤 git push done.")
+
+    # CF Pages deploy
+    if args.cf_pages_project:
+        if not os.environ.get("CLOUDFLARE_API_TOKEN"):
+            print("⚠️  --cf-pages-project set but CLOUDFLARE_API_TOKEN not in env — skipping", file=sys.stderr)
+        else:
+            r = subprocess.run(
+                ["wrangler", "pages", "deploy", str(site_dir), f"--project-name={args.cf_pages_project}"],
+                capture_output=True, text=True,
+            )
+            sys.stdout.write(r.stdout)
+            sys.stderr.write(r.stderr)
+            # Extract URL from wrangler output
+            for line in r.stdout.splitlines():
+                if ".pages.dev" in line:
+                    print(f"🌐 deployed: {line.strip()}")
+                    break
+
+
+def cmd_accounts(c: OmnaraClient, args):
+    accs = load_accounts()
+    if not accs:
+        print("(none configured) — copy ~/.omnara/creds.json or create ~/.config/omnara-manage/accounts.json")
+        return
+    for a in accs:
+        print(f"  @{a.get('alias','?'):<10} {a.get('email','?'):<30} user_id={a.get('user_id','?')}")
+
+
 def cmd_triage(c: OmnaraClient, args):
-    data = triage_mod.triage(c)
+    if args.multi:
+        clients = OmnaraClient.all_accounts()
+        if not clients:
+            print("⚠️  no accounts configured. Add to ~/.config/omnara-manage/accounts.json", file=sys.stderr)
+            sys.exit(2)
+        data = triage_mod.triage_multi(clients)
+    else:
+        data = triage_mod.triage(c)
     buckets = data["buckets"]
 
     if args.json:
@@ -224,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp.add_parser("me")
     sp.add_parser("machines")
+    sp.add_parser("accounts", help="list configured accounts")
 
     pl = sp.add_parser("list", help="list recent sessions")
     pl.add_argument("--limit", type=int, default=30)
@@ -235,11 +342,20 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--json", action="store_true")
 
     pt = sp.add_parser("triage", help="score sessions by 'needs Steve'")
+    pt.add_argument("--multi", action="store_true", help="merge across all configured accounts")
     pt.add_argument("--json", action="store_true")
     pt.add_argument("--html", action="store_true", help="also write HTML report")
     pt.add_argument("--publish", action="store_true", help="publish HTML via `report publish`")
     pt.add_argument("--out", help="output dir for HTML")
     pt.add_argument("--slug", default="omnara-triage")
+
+    psy = sp.add_parser("sync", help="multi-account triage → tracking repo → git push → optional CF Pages deploy")
+    psy.add_argument("--repo-dir", required=True, help="local path to the tracking repo")
+    psy.add_argument("--repo-url", help="git URL to clone if --repo-dir doesn't exist")
+    psy.add_argument("--cf-pages-project", help="Cloudflare Pages project name to deploy to")
+    psy.add_argument("--no-git", action="store_true", help="skip git commit/push")
+    psy.add_argument("--summarize", action="store_true", help="add LLM one-liner summaries (needs ANTHROPIC_API_KEY)")
+    psy.add_argument("--summarize-top", type=int, default=8, help="how many cards per bucket to summarize")
 
     pse = sp.add_parser("send", help="send a message into an existing session")
     pse.add_argument("usid")
@@ -267,9 +383,11 @@ def build_parser() -> argparse.ArgumentParser:
 HANDLERS = {
     "me": cmd_me,
     "machines": cmd_machines,
+    "accounts": cmd_accounts,
     "list": cmd_list,
     "show": cmd_show,
     "triage": cmd_triage,
+    "sync": cmd_sync,
     "send": cmd_send,
     "launch": cmd_launch,
     "ensure-workspace": cmd_ensure_workspace,

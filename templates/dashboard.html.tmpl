@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Steve's Omnara Fleet Dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📋</text></svg>" />
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--border:#30363d;--fg:#e6edf3;--mute:#8b949e;--accent:#f59e0b;--ok:#86efac;--warn:#fbbf24;--err:#ef4444;--link:#7dd3fc;--mono:ui-monospace,Menlo,Consolas,monospace;}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);}
+.wrap{max-width:1100px;margin:0 auto;padding:20px;}
+header{padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;}
+header h1{margin:0;font-size:22px;}
+header .lede{color:var(--mute);font-size:12px;margin-top:4px;}
+header .meta{color:var(--mute);font-size:11px;font-family:var(--mono);text-align:right;}
+header .meta a{color:var(--link);}
+h2{margin:24px 0 10px;font-size:16px;color:var(--accent);}
+
+.acct-bar{display:flex;gap:8px;margin:8px 0 14px;flex-wrap:wrap;}
+.acct{padding:5px 12px;border-radius:14px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--panel);cursor:pointer;user-select:none;}
+.acct.active{background:#22c55e22;border-color:#22c55e88;color:var(--ok);}
+.acct.dim{opacity:.5;}
+
+.top{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0;}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+.kpi .v{font-size:22px;font-weight:600;}
+.kpi .l{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+.kpi.urgent{border-color:#ef444466;background:linear-gradient(135deg,#ef444415,var(--panel));}
+.kpi.high{border-color:#fbbf2466;background:linear-gradient(135deg,#fbbf2410,var(--panel));}
+.kpi.medium{border-color:#7dd3fc66;}
+.kpi.idle{border-color:var(--border);opacity:.7;}
+
+.tag{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-family:var(--mono);font-weight:500;}
+.tag.urgent{background:#ef444433;color:#fca5a5;}
+.tag.high{background:#fbbf2433;color:#fde68a;}
+.tag.medium{background:#7dd3fc33;color:var(--link);}
+.tag.idle{background:#30363d;color:var(--mute);}
+.tag.acct{font-family:var(--mono);font-weight:600;}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:8px 0;border-left:3px solid var(--mute);}
+.card.urgent{border-left-color:#ef4444;background:linear-gradient(90deg,#ef444408,var(--panel) 30%);}
+.card.high{border-left-color:#fbbf24;}
+.card.medium{border-left-color:#7dd3fc;}
+.card.idle{border-left-color:var(--mute);opacity:.85;}
+.card .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;}
+.card .nm{font-weight:600;font-size:13px;flex:1;min-width:200px;}
+.card .meta{font-family:var(--mono);font-size:11px;color:var(--mute);}
+.card .quote{background:#0d1117;border:1px solid var(--border);border-radius:5px;padding:8px 10px;margin:6px 0 4px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#cbd5e1;font-family:var(--mono);max-height:200px;overflow:auto;}
+.card .quote.expanded{max-height:none;}
+.card .summary{font-size:12px;color:var(--ok);background:#22c55e11;border:1px solid #22c55e44;border-radius:5px;padding:6px 10px;margin:4px 0;font-style:italic;}
+.card .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;}
+.card a.go{background:var(--link);color:var(--bg);padding:4px 10px;border-radius:5px;font-weight:600;font-size:11px;text-decoration:none;}
+.card button.expand{background:transparent;border:1px solid var(--border);color:var(--mute);padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit;}
+.card .hits{display:flex;gap:3px;flex-wrap:wrap;}
+.card .hits span{background:#0d1117;border:1px solid var(--border);color:var(--mute);font-family:var(--mono);font-size:10px;padding:1px 4px;border-radius:3px;}
+.score{font-family:var(--mono);background:#0d1117;border:1px solid var(--border);padding:1px 5px;border-radius:6px;font-size:10px;color:var(--accent);}
+
+.toolbar{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap;}
+input[type=text]{background:#0d1117;border:1px solid var(--border);color:var(--fg);padding:5px 9px;border-radius:5px;font-family:var(--mono);font-size:12px;flex:1;min-width:180px;}
+
+.legend{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:8px 0;font-size:11px;color:var(--mute);}
+.legend code{background:#0d1117;padding:1px 4px;border-radius:3px;color:var(--fg);}
+footer{margin-top:36px;padding:18px 0;border-top:1px solid var(--border);color:var(--mute);font-size:11px;}
+
+.machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;margin:6px 0;}
+.machine{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:6px 9px;font-size:11px;}
+.machine.online{border-left:2px solid #22c55e;}
+.machine.offline{opacity:.5;}
+.machine .h{font-family:var(--mono);font-size:11px;color:var(--fg);}
+.machine .s{color:var(--mute);font-size:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>📋 Steve's Omnara Fleet Dashboard</h1>
+    <div class="lede">All Omnara conversations across all machines, all accounts</div>
+  </div>
+  <div class="meta">
+    snapshot <span id="now"></span><br>
+    <a href="https://github.com/oyzh888/omnara-tracker" target="_blank">github · oyzh888/omnara-tracker</a><br>
+    powered by <a href="https://github.com/oyzh888/omnara-manage" target="_blank">omnara-manage</a>
+  </div>
+</header>
+
+<div class="acct-bar" id="acctBar"></div>
+
+<div class="top" id="kpis"></div>
+
+<div class="legend">
+  <strong>Bucketing:</strong>
+  +100 if Omnara reports <code>AWAITING_INPUT</code>;
+  +10 if last sender is the agent;
+  +2 per strong question signal (<code>?/你拍/should I/要不要</code>);
+  +1 per soft signal (<code>review/选/想</code>);
+  +recency bonus.
+  Click any card → opens that session in Omnara dashboard.
+</div>
+
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="filter by name / branch / account..." oninput="render()" />
+</div>
+
+<h2>🚨 Urgent — agent explicitly waiting</h2>
+<div id="urgent"></div>
+<h2>🔥 Likely needs your decision</h2>
+<div id="likely"></div>
+<h2>💭 Maybe waiting (lower confidence)</h2>
+<div id="maybe"></div>
+<h2>✅ Idle — probably fine</h2>
+<div id="idle"></div>
+
+<h2>🖥️ Machines</h2>
+<div class="machines" id="machines"></div>
+
+<footer>
+  Static snapshot · regenerated by <code>omnara-mgr sync</code> · this URL is git/Pages backed (oyzh888/omnara-tracker → Cloudflare Pages).
+  <br>Raw JSON: <a id="rawLink" href="data/latest.json" target="_blank">data/latest.json</a> ·
+  <a href="#" onclick="const r=document.getElementById('raw');r.style.display=r.style.display==='block'?'none':'block';return false">show embedded data ▾</a>
+  <pre id="raw" style="display:none;max-height:300px;overflow:auto;font-size:10px;background:#0d1117;border:1px solid var(--border);border-radius:5px;padding:10px;"></pre>
+</footer>
+
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const data = JSON.parse(document.getElementById('data').textContent);
+document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
+document.getElementById('now').textContent = data.snapshot_at.replace('T',' ').slice(0,19) + ' UTC';
+
+// Account toggles
+const accounts = data.accounts || [];
+const activeAccounts = new Set(accounts.filter(a=>!a.error).map(a=>a.account));
+const acctBar = document.getElementById('acctBar');
+function renderAcctBar(){
+  acctBar.innerHTML = accounts.map(a=>{
+    const on = activeAccounts.has(a.account);
+    const counts = a.counts ? `(${a.total_sessions} · L${a.counts.likely_question} M${a.counts.maybe_question})` : (a.error ? `<span style="color:var(--err)">err</span>` : '');
+    return `<div class="acct ${on?'active':'dim'}" onclick="toggleAcct('${a.account}')">@${a.account} ${counts}</div>`;
+  }).join('');
+}
+function toggleAcct(name){
+  if(activeAccounts.has(name)) activeAccounts.delete(name);
+  else activeAccounts.add(name);
+  render();
+  renderAcctBar();
+}
+
+const buckets = data.buckets;
+
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+function renderCard(r, kind){
+  const url = `https://www.omnara.com/dashboard/sessions/${r.usid}`;
+  const branch = r.branch ? ` · <code>${esc(r.branch)}</code>` : '';
+  const hits = (r.hits||[]).map(h=>`<span>${esc(h)}</span>`).join('');
+  const acctTag = r.account ? `<span class="tag acct" style="background:${esc(accountColor(r.account))}33;color:${esc(accountColor(r.account))}">@${esc(r.account)}</span>` : '';
+  const summary = r.llm_summary ? `<div class="summary">💡 ${esc(r.llm_summary)}</div>` : '';
+  return `
+    <div class="card ${kind}" data-search="${esc(((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')).toLowerCase())}">
+      <div class="row1">
+        <div class="nm">${esc(r.name||'(unnamed)')}</div>
+        ${acctTag}
+        <span class="score">score ${r.score}</span>
+        <span class="tag ${kind}">${kind}</span>
+        <span class="meta">${r.age_str} ago${branch}</span>
+      </div>
+      ${summary}
+      <div class="quote" id="q-${r.usid}">${esc(r.last_text||'(no text)')}</div>
+      <div class="actions">
+        <a class="go" href="${url}" target="_blank">open ↗</a>
+        <button class="expand" onclick="document.getElementById('q-${r.usid}').classList.toggle('expanded');this.textContent=this.textContent.includes('full')?'show less':'show full';">show full</button>
+        <div class="hits">${hits}</div>
+      </div>
+    </div>`;
+}
+
+function accountColor(name){
+  for(const a of accounts){
+    if(a.account === name) return a.tag_color || '#7dd3fc';
+  }
+  return '#7dd3fc';
+}
+
+function render(){
+  const q = (document.getElementById('filter').value||'').toLowerCase();
+  function filt(arr){
+    return arr.filter(r =>
+      activeAccounts.has(r.account||'personal') &&
+      (q ? JSON.stringify(r).toLowerCase().includes(q) : true)
+    );
+  }
+  const urgent = filt(buckets.awaiting||[]);
+  const likely = filt(buckets.likely_question||[]);
+  const maybe = filt(buckets.maybe_question||[]);
+  const idle = [...filt(buckets.idle||[]), ...filt(buckets.agent_should_respond||[])];
+
+  document.getElementById('urgent').innerHTML = urgent.map(r=>renderCard(r,'urgent')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none — nothing explicitly blocked.</div>';
+  document.getElementById('likely').innerHTML = likely.map(r=>renderCard(r,'high')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
+  document.getElementById('maybe').innerHTML  = maybe.map(r=>renderCard(r,'medium')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
+  document.getElementById('idle').innerHTML   = idle.map(r=>renderCard(r,'idle')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
+
+  // KPIs
+  const kpis = document.getElementById('kpis');
+  kpis.innerHTML = `
+    <div class="kpi urgent"><div class="l">awaiting</div><div class="v">${urgent.length}</div></div>
+    <div class="kpi high"><div class="l">likely 🔥</div><div class="v">${likely.length}</div></div>
+    <div class="kpi medium"><div class="l">maybe 💭</div><div class="v">${maybe.length}</div></div>
+    <div class="kpi idle"><div class="l">idle ✅</div><div class="v">${idle.length}</div></div>
+    <div class="kpi"><div class="l">total active</div><div class="v">${urgent.length+likely.length+maybe.length+idle.length}</div></div>
+  `;
+}
+
+// Machines
+const machinesDiv = document.getElementById('machines');
+const ms = (data.machines && data.machines.machines) || [];
+machinesDiv.innerHTML = ms.map(m=>{
+  const cls = m.status==='ONLINE' ? 'online' : 'offline';
+  const flag = m.status==='ONLINE' ? '🟢' : '⚫';
+  return `<div class="machine ${cls}"><div class="h">${flag} ${esc(m.hostname||'?')}</div><div class="s">daemon ${m.daemon_version||'?'} · seen ${(m.last_seen_at||'?').slice(0,19)}</div></div>`;
+}).join('');
+
+renderAcctBar();
+render();
+</script>
+</body>
+</html>

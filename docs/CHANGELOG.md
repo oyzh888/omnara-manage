@@ -2,6 +2,19 @@
 
 All notable changes to omnara-manage. The Omnara backend is undocumented; log every API surprise here.
 
+## [0.2.0] - 2026-05-28
+
+### Added
+- **Multi-account support.** New config at `~/.config/omnara-manage/accounts.json` (chmod 600) lets you store multiple PATs. `omnara-mgr accounts` lists them; `omnara-mgr triage --multi` merges across.
+- **`sync` action**: end-to-end "triage all accounts → write JSON snapshot to a tracking repo → render static HTML → git push → optional Cloudflare Pages deploy". Designed for the [`oyzh888/omnara-tracker`](https://github.com/oyzh888/omnara-tracker) repo.
+- **`templates/dashboard.html.tmpl`**: multi-account aware view with per-account toggles, machine grid, and embedded JSON.
+- **`summarize.py`**: optional Anthropic Haiku one-liner summaries on top-N cards per bucket. Cached by hash of last_text. Off unless `ANTHROPIC_API_KEY` is set, then enable with `--summarize`.
+
+### Verified
+- 2 accounts (@personal 389 sessions, @aitist 50) merged into single dashboard view.
+- 9 machines visible across both accounts (4-5 ONLINE per account).
+- Dashboard deployed at https://omnara-tracker-steve.pages.dev (Cloudflare Pages, free plan, deploys on every `wrangler pages deploy`).
+
 ## [0.1.0] - 2026-05-28
 
 Initial release. Reverse-engineered from `~/.omnara/bin/omnara` strings dump.

@@ -1,7 +1,7 @@
 ---
 name: omnara-manage
 description: Steve's Omnara fleet butler. Read all sessions across all machines, triage which ones need Steve's input, send messages into existing sessions, dispatch new sessions ("派活"), manage workspaces. Use when the user says "omnara triage", "omnara 看下", "哪些 session 在等我", "派个活 to omnara", "send a message to session X", "list my omnara sessions", "open this omnara link", or any Omnara fleet-management operation. TRIGGER also when the user gives an `https://www.omnara.com/dashboard/sessions/...` URL and wants something done with it.
-argument-hint: "[action] e.g. 'triage' / 'send <usid> <text>' / 'launch <path> <prompt>'"
+argument-hint: "[action] e.g. 'triage' / 'sync' / 'send <usid> <text>' / 'launch <path> <prompt>'"
 ---
 
 # omnara-manage — Steve's Omnara Fleet Butler
@@ -20,9 +20,21 @@ End goal: one Omnara controlling Steve's fleet of Omnara chats.
 
 ## Prerequisites
 
-- Token: `~/.omnara/creds.json` → `pat` field (long-lived JWT, set up by `omnara auth login`)
+- Token(s):
+  - default: `~/.omnara/creds.json` → `pat` field (long-lived JWT, set up by `omnara auth login`)
+  - multi-account: `~/.config/omnara-manage/accounts.json` (chmod 600), schema:
+    ```json
+    {
+      "accounts": [
+        {"alias":"personal","email":"...","user_id":"...","pat_source":"~/.omnara/creds.json","tag_color":"#7dd3fc"},
+        {"alias":"aitist","email":"...","user_id":"...","pat_inline":"<JWT>","tag_color":"#fbbf24"}
+      ]
+    }
+    ```
 - Python 3.10+ with stdlib only (no extra deps)
-- Optional: `report` CLI on PATH (from report-skill) for publishing the triage HTML
+- Optional: `report` CLI on PATH (from report-skill) for publishing single-account triage HTML
+- Optional: `wrangler` CLI + `$CLOUDFLARE_API_TOKEN` for `sync --cf-pages-project`
+- Optional: `$ANTHROPIC_API_KEY` for `--summarize` (uses Haiku)
 
 ## Quickstart (CLI)
 
@@ -35,11 +47,13 @@ Actions:
 | action | what it does |
 |---|---|
 | `me` | show your user info & token health |
-| `machines` | list registered daemons + online status |
+| `accounts` | list all configured Omnara accounts |
+| `machines` | list registered daemons + online status (current account) |
 | `list [--limit N]` | list recent sessions, one line each |
 | `show <usid>` | print last 20 messages of a session |
-| `triage` | scan everything, score by "needs Steve", print buckets |
+| `triage [--multi]` | scan everything, score by "needs Steve", print buckets. `--multi` merges all accounts |
 | `triage --html [--publish]` | also build/publish the triage HTML report |
+| `sync --repo-dir <path> [--cf-pages-project <name>] [--summarize]` | ⭐ multi-account triage → tracker repo → git push → CF Pages deploy |
 | `send <usid> <text>` | inject a message into an existing session |
 | `launch <wid> <directory> <prompt>` | spawn a fresh session with initial prompt |
 | `ensure-workspace <local_path>` | create-or-fetch a workspace on this machine |
