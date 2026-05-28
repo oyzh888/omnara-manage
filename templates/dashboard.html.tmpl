@@ -74,8 +74,16 @@ input[type=text]:focus,input[type=search]:focus{outline:none;border-color:var(--
 .card .summary{font-size:12px;color:var(--ok);background:#22c55e11;border:1px solid #22c55e44;border-radius:6px;padding:6px 10px;margin:4px 0;line-height:1.4;}
 
 /* Markdown content */
-.md{font-size:13px;line-height:1.55;color:#cbd5e1;background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:6px 0 4px;max-height:220px;overflow:auto;word-break:break-word;}
-.md.expanded{max-height:none;}
+.md{font-size:13px;line-height:1.55;color:#cbd5e1;background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:6px 0 4px;overflow:auto;word-break:break-word;}
+.md.user-ctx{background:#1f6feb11;border-color:#1f6feb44;font-size:12.5px;color:#9bb8d9;cursor:pointer;}
+.md.user-ctx .who{font-size:10px;color:var(--link);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;font-family:var(--mono);}
+.md.user-ctx .who::after{content:" — click to expand";color:var(--mute);font-weight:400;text-transform:none;}
+.md.user-ctx.expanded .who::after{content:" — click to collapse";}
+.md.user-ctx .body{max-height:140px;overflow:hidden;position:relative;}
+.md.user-ctx .body::after{content:"";position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,#0d1117);pointer-events:none;}
+.md.user-ctx.expanded .body{max-height:none;}
+.md.user-ctx.expanded .body::after{display:none;}
+.md.agent-msg .who{font-size:10px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;font-family:var(--mono);}
 .md p{margin:0 0 8px;}
 .md p:last-child{margin-bottom:0;}
 .md h1,.md h2,.md h3,.md h4{margin:8px 0 4px;color:var(--fg);font-size:14px;}
@@ -312,11 +320,11 @@ function renderCard(r, kind){
         <span class="meta">${esc(r.age_str)} ago${branchHTML}</span>
       </div>
       ${summary}
-      <div class="md" data-md="${esc(r.usid)}">${md(r.last_text)}</div>
+      ${r.prev_user_text ? `<div class="md user-ctx" data-md-ctx="${esc(r.usid)}"><div class="who">↳ your last message</div><div class="body">${md(r.prev_user_text)}</div></div>` : ''}
+      <div class="md agent-msg" data-md="${esc(r.usid)}"><div class="who">${r.last_sender==='user'?'YOU (last)':'AGENT REPLY'}</div>${md(r.last_text)}</div>
       <div class="actions">
         <a class="btn primary" href="${url}" target="_blank">open ↗</a>
         <button class="btn" data-act="reply">💬 reply</button>
-        <button class="btn" data-act="expand">show full</button>
         <div class="hits">${hits}</div>
       </div>
       <div class="reply ${isStaged?'open staged':''}" data-reply="${esc(r.usid)}">
@@ -349,12 +357,13 @@ document.addEventListener('click', e=>{
   const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
   const act = btn.dataset.act;
   if(act==='reply' || act==='cancel') toggleReply(usid);
-  else if(act==='expand'){
-    const md = card.querySelector('[data-md]');
-    md.classList.toggle('expanded');
-    btn.textContent = md.classList.contains('expanded') ? 'show less' : 'show full';
-  }
   else if(act==='stage') stage(usid, r.name||'', account, asid);
+});
+
+// Click on user-ctx box to expand/collapse
+document.addEventListener('click', e=>{
+  const ctx = e.target.closest('.md.user-ctx');
+  if(ctx) ctx.classList.toggle('expanded');
   else if(act==='unstage') unstage(usid);
   else if(act==='send') sendOne(usid, asid);
 });

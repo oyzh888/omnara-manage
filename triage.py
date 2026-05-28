@@ -108,22 +108,35 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
         if age is None or age > 60 * 24 * 7:  # was 48h, now 7d for non-pinned
             return None
 
-    # Peek last messages
+    # Peek last messages — grab BOTH the most recent agent reply AND the prior user message,
+    # full text (no truncation), so Steve has the question + the context he asked.
     last_text = None
     last_sender = None
+    prev_user_text = None
     try:
-        msgs = c.get_messages(summary["usid"], summary["asid"], limit=peek_limit)
+        # API returns oldest-first inside one page (newest at end).
+        # Pull a healthy window so we can grab last user + last agent text reliably.
+        msgs = c.get_messages(summary["usid"], summary["asid"], limit=max(peek_limit, 30))
         for m in reversed(msgs):
             content = (m.get("payload") or {}).get("content") or {}
-            if content.get("type") == "text" and (content.get("text") or "").strip():
+            if content.get("type") != "text":
+                continue
+            text = (content.get("text") or "").strip()
+            if not text:
+                continue
+            sender = (m.get("sender") or {}).get("kind")
+            if last_text is None:
                 last_text = content["text"]
-                last_sender = (m.get("sender") or {}).get("kind")
+                last_sender = sender
+                continue
+            # Looking for the prior USER message (the one that prompted the agent's last reply)
+            if prev_user_text is None and sender == "user":
+                prev_user_text = content["text"]
                 break
     except Exception:
         pass
 
     if not last_text:
-        # Pinned session with no readable text yet — keep a stub so it shows up
         if pinned:
             last_text = "(no text yet — open in dashboard to see content)"
             last_sender = "agent_session"
@@ -166,8 +179,9 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
         **summary,
         "age_min": age,
         "age_str": fmt_age(age),
-        "last_text": (last_text or "")[-600:],
+        "last_text": last_text or "",
         "last_sender": last_sender,
+        "prev_user_text": prev_user_text or "",
         "score": score,
         "hits": hits[:8],
     }
