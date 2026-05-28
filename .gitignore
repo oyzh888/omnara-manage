@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# never commit creds
+creds.json
+*.env

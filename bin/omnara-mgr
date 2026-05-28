@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""omnara-mgr — CLI for the omnara-manage skill.
+
+Usage:
+    omnara-mgr <action> [args...]
+
+Actions:
+    me
+    machines
+    list [--limit N] [--json]
+    show <usid> [--limit N] [--json]
+    triage [--json] [--html [--publish]]
+    send <usid> <text>            # auto-resolves asid
+    launch <wid> <directory> <prompt>
+    ensure-workspace <local_path>
+    delete <usid>
+    raw <METHOD> <path> [json-body]
+
+Reads PAT from $OMNARA_PAT or ~/.omnara/creds.json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HERE))
+
+from omnara_client import OmnaraClient, OmnaraError  # noqa: E402
+import triage as triage_mod  # noqa: E402
+
+
+# ---------- helpers ----------
+
+def _print_json(obj):
+    print(json.dumps(obj, indent=2, default=str, ensure_ascii=False))
+
+
+def _fmt_age(iso: str | None) -> str:
+    if not iso:
+        return "?"
+    from datetime import datetime, timezone
+    try:
+        d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except Exception:
+        return "?"
+    m = (datetime.now(timezone.utc) - d).total_seconds() / 60
+    if m < 60:
+        return f"{m:.0f}m"
+    if m < 60 * 24:
+        return f"{m/60:.1f}h"
+    return f"{m/(60*24):.1f}d"
+
+
+def _resolve_asid(c: OmnaraClient, usid: str) -> str:
+    s = c.get_session(usid)
+    ag = (s.get("agent_sessions") or [None])[0]
+    if not ag:
+        raise SystemExit(f"session {usid} has no agent_session")
+    return ag["session_id"]
+
+
+# ---------- commands ----------
+
+def cmd_me(c: OmnaraClient, args):
+    me = c.me()
+    print(f"user_id : {me.get('id')}")
+    print(f"email   : {me.get('email')}")
+    print(f"name    : {me.get('display_name') or '-'}")
+    print(f"created : {me.get('created_at')}")
+
+
+def cmd_machines(c: OmnaraClient, args):
+    ms = c.machines()
+    for m in ms:
+        flag = "🟢" if m.get("status") == "ONLINE" else "⚫"
+        print(f"{flag}  {m.get('hostname'):<40} id={m.get('id')}  daemon={m.get('daemon_version')}  last_seen={_fmt_age(m.get('last_seen_at'))} ago")
+
+
+def cmd_list(c: OmnaraClient, args):
+    sessions = c.list_sessions()
+    if args.json:
+        _print_json(sessions[: args.limit])
+        return
+    for s in sessions[: args.limit]:
+        sm = c.session_summary(s)
+        flag = "📌 " if sm["pinned"] else ""
+        ag_status = sm["work_status"] or "-"
+        cn_status = sm["connection_status"] or "-"
+        url = c.dashboard_url(sm["usid"])
+        print(f"{flag}{sm['name'][:55]:55}  {ag_status:<14} {cn_status:<13} {_fmt_age(sm['last_msg']):>6} ago  {url}")
+
+
+def cmd_show(c: OmnaraClient, args):
+    usid = args.usid
+    asid = _resolve_asid(c, usid)
+    msgs = c.get_messages(usid, asid, limit=args.limit)
+    if args.json:
+        _print_json(msgs)
+        return
+    print(f"== {usid} (agent={asid})")
+    for m in msgs:
+        content = (m.get("payload") or {}).get("content") or {}
+        sender = (m.get("sender") or {}).get("kind", "?")
+        t = content.get("type")
+        if t == "text":
+            text = content.get("text") or ""
+            print(f"\n[{sender:14}] {text}")
+        else:
+            print(f"\n[{sender:14}] <{t}>")
+
+
+def cmd_send(c: OmnaraClient, args):
+    usid = args.usid
+    asid = _resolve_asid(c, usid)
+    text = args.text
+    # By convention, prefix with [from omnara-manage] unless caller already did
+    if not text.startswith("[from "):
+        text = f"[from omnara-manage] {text}"
+    res = c.send_message(usid, asid, text)
+    print(f"✅ sent  message_id={res.get('message_id')}  delivery_mode={res.get('delivery_mode')}")
+    print(f"    {c.dashboard_url(usid)}")
+
+
+def cmd_launch(c: OmnaraClient, args):
+    res = c.launch_session(args.wid, args.directory, initial_message=args.prompt)
+    payload = res.get("payload", res)
+    usid = payload.get("user_session_id")
+    print(f"✅ launched  user_session_id={usid}")
+    if usid:
+        print(f"    {c.dashboard_url(usid)}")
+
+
+def cmd_ensure_workspace(c: OmnaraClient, args):
+    if not os.path.isdir(args.local_path):
+        # workspaces/ensure requires the path to exist on the daemon machine
+        print(f"⚠️  {args.local_path} does not exist locally — Omnara will refuse. mkdir -p first.", file=sys.stderr)
+        sys.exit(2)
+    ws = c.ensure_workspace(args.local_path)
+    print(f"✅ workspace_id={ws['id']}  path={args.local_path}")
+    _print_json({"id": ws["id"], "user_machine_paths": ws.get("user_machine_paths", [])})
+
+
+def cmd_delete(c: OmnaraClient, args):
+    c.delete_session(args.usid)
+    print(f"✅ deleted {args.usid}")
+
+
+def cmd_raw(c: OmnaraClient, args):
+    body = json.loads(args.body) if args.body else None
+    res = c.request(args.method.upper(), args.path, body=body)
+    _print_json(res)
+
+
+# ---------- triage ----------
+
+def _render_triage_html(data: dict) -> str:
+    tmpl_path = HERE / "templates" / "triage.html.tmpl"
+    return tmpl_path.read_text().replace("__DATA__", json.dumps(data, default=str))
+
+
+def cmd_triage(c: OmnaraClient, args):
+    data = triage_mod.triage(c)
+    buckets = data["buckets"]
+
+    if args.json:
+        _print_json(data)
+        return
+
+    if args.html or args.publish:
+        html = _render_triage_html(data)
+        out_path = Path(args.out or tempfile.mkdtemp(prefix="omnara-triage-")) / "omnara-triage.html"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(html)
+        print(f"📄 wrote {out_path}  ({out_path.stat().st_size} bytes)")
+        if args.publish:
+            if shutil.which("report") is None:
+                print("⚠️  `report` CLI not found — install from oyzh888/report-skill, or pass --no-publish", file=sys.stderr)
+                sys.exit(2)
+            slug = args.slug or "omnara-triage"
+            r = subprocess.run(
+                ["report", "publish", str(out_path), "--channel", "private-adobe-io", "--slug", slug],
+                capture_output=True, text=True,
+            )
+            sys.stdout.write(r.stdout)
+            sys.stderr.write(r.stderr)
+            sys.exit(r.returncode)
+
+    # text mode summary
+    counts = {k: len(v) for k, v in buckets.items()}
+    print(f"\n📋 Omnara triage — {data['total_sessions']} total sessions, {sum(counts.values())} active")
+    print(f"   awaiting={counts['awaiting']}  likely={counts['likely_question']}  maybe={counts['maybe_question']}  idle={counts['idle']+counts['agent_should_respond']}\n")
+
+    def print_bucket(title, items, max_n=10):
+        if not items:
+            return
+        print(f"=== {title} ===")
+        for r in items[:max_n]:
+            print(f"  [score={r['score']:>3}, age={r['age_str']:>6}] {r['name'][:55]}")
+            print(f"     {OmnaraClient.dashboard_url(r['usid'])}")
+            print(f"     {r['last_text'][-180:].strip().replace(chr(10),' / ')[:180]}")
+        if len(items) > max_n:
+            print(f"  ... and {len(items)-max_n} more\n")
+        else:
+            print()
+
+    print_bucket("🚨 URGENT — awaiting_input", buckets["awaiting"])
+    print_bucket("🔥 LIKELY needs your decision", buckets["likely_question"])
+    print_bucket("💭 MAYBE waiting", buckets["maybe_question"], max_n=5)
+
+
+# ---------- entry ----------
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="omnara-mgr", description="Steve's Omnara fleet butler.")
+    sp = p.add_subparsers(dest="action", required=True)
+
+    sp.add_parser("me")
+    sp.add_parser("machines")
+
+    pl = sp.add_parser("list", help="list recent sessions")
+    pl.add_argument("--limit", type=int, default=30)
+    pl.add_argument("--json", action="store_true")
+
+    ps = sp.add_parser("show", help="print last messages of a session")
+    ps.add_argument("usid")
+    ps.add_argument("--limit", type=int, default=20)
+    ps.add_argument("--json", action="store_true")
+
+    pt = sp.add_parser("triage", help="score sessions by 'needs Steve'")
+    pt.add_argument("--json", action="store_true")
+    pt.add_argument("--html", action="store_true", help="also write HTML report")
+    pt.add_argument("--publish", action="store_true", help="publish HTML via `report publish`")
+    pt.add_argument("--out", help="output dir for HTML")
+    pt.add_argument("--slug", default="omnara-triage")
+
+    pse = sp.add_parser("send", help="send a message into an existing session")
+    pse.add_argument("usid")
+    pse.add_argument("text")
+
+    pla = sp.add_parser("launch", help="spawn a new session in a workspace")
+    pla.add_argument("wid")
+    pla.add_argument("directory")
+    pla.add_argument("prompt")
+
+    pew = sp.add_parser("ensure-workspace")
+    pew.add_argument("local_path")
+
+    pd = sp.add_parser("delete")
+    pd.add_argument("usid")
+
+    pr = sp.add_parser("raw", help="any endpoint, any method")
+    pr.add_argument("method")
+    pr.add_argument("path")
+    pr.add_argument("body", nargs="?", help="optional JSON body")
+
+    return p
+
+
+HANDLERS = {
+    "me": cmd_me,
+    "machines": cmd_machines,
+    "list": cmd_list,
+    "show": cmd_show,
+    "triage": cmd_triage,
+    "send": cmd_send,
+    "launch": cmd_launch,
+    "ensure-workspace": cmd_ensure_workspace,
+    "delete": cmd_delete,
+    "raw": cmd_raw,
+}
+
+
+def main():
+    args = build_parser().parse_args()
+    try:
+        c = OmnaraClient()
+        HANDLERS[args.action](c, args)
+    except OmnaraError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
+if __name__ == "__main__":
+    main()

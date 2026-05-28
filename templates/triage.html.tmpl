@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Omnara Triage — Who needs Steve?</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--border:#30363d;--fg:#e6edf3;--mute:#8b949e;--accent:#f59e0b;--ok:#86efac;--warn:#fbbf24;--err:#ef4444;--link:#7dd3fc;--mono:ui-monospace,Menlo,Consolas,monospace;}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);}
+.wrap{max-width:1100px;margin:0 auto;padding:24px;}
+header{padding:16px 0 16px;border-bottom:1px solid var(--border);margin-bottom:24px;}
+h1{margin:0 0 4px;font-size:24px;}
+h2{margin:28px 0 10px;font-size:17px;color:var(--accent);}
+h3{margin:20px 0 8px;font-size:14px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;}
+.lede{color:var(--mute);font-size:13px;}
+.top{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:14px 0;}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;}
+.kpi .v{font-size:24px;font-weight:600;}
+.kpi .l{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+.kpi.urgent{border-color:#ef444466;background:linear-gradient(135deg,#ef444415,var(--panel));}
+.kpi.high{border-color:#fbbf2466;background:linear-gradient(135deg,#fbbf2410,var(--panel));}
+.kpi.medium{border-color:#7dd3fc66;}
+.kpi.idle{border-color:var(--border);opacity:.7;}
+.tag{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-family:var(--mono);font-weight:500;}
+.tag.urgent{background:#ef444433;color:#fca5a5;}
+.tag.high{background:#fbbf2433;color:#fde68a;}
+.tag.medium{background:#7dd3fc33;color:var(--link);}
+.tag.idle{background:#30363d;color:var(--mute);}
+.tag.work{background:#22c55e33;color:var(--ok);}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:10px 0;border-left:3px solid var(--mute);}
+.card.urgent{border-left-color:#ef4444;background:linear-gradient(90deg,#ef444408,var(--panel) 30%);}
+.card.high{border-left-color:#fbbf24;}
+.card.medium{border-left-color:#7dd3fc;}
+.card.idle{border-left-color:var(--mute);opacity:.85;}
+.card .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+.card .nm{font-weight:600;font-size:14px;flex:1;min-width:200px;}
+.card .meta{font-family:var(--mono);font-size:11px;color:var(--mute);}
+.card .quote{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:8px 0 6px;font-size:12px;line-height:1.55;white-space:pre-wrap;color:#cbd5e1;font-family:var(--mono);max-height:240px;overflow:auto;}
+.card .quote.expanded{max-height:none;}
+.card .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+.card a.go{background:var(--link);color:var(--bg);padding:5px 12px;border-radius:6px;font-weight:600;font-size:12px;text-decoration:none;}
+.card a.go:hover{filter:brightness(1.15);}
+.card a.copy,.card button.expand{background:transparent;border:1px solid var(--border);color:var(--mute);padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;text-decoration:none;}
+.card a.copy:hover,.card button.expand:hover{color:var(--fg);border-color:var(--mute);}
+.card .hits{display:flex;gap:4px;flex-wrap:wrap;}
+.card .hits span{background:#0d1117;border:1px solid var(--border);color:var(--mute);font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:3px;}
+.score{font-family:var(--mono);background:#0d1117;border:1px solid var(--border);padding:1px 6px;border-radius:8px;font-size:11px;color:var(--accent);}
+.toolbar{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap;}
+input[type=text]{background:#0d1117;border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:6px;font-family:var(--mono);font-size:12px;flex:1;min-width:180px;}
+.legend{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;font-size:12px;color:var(--mute);}
+.legend code{background:#0d1117;padding:1px 5px;border-radius:3px;}
+footer{margin-top:48px;padding:24px 0;border-top:1px solid var(--border);color:var(--mute);font-size:11px;}
+.muted{color:var(--mute);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>📋 Omnara Triage — Who needs Steve?</h1>
+  <div class="lede">Snapshot at <span id="now"></span> · <span id="total"></span> active sessions on <span id="machine"></span> · scored by question signals + age + sender</div>
+</header>
+
+<div class="top" id="kpis"></div>
+
+<div class="legend">
+  <strong>How the score works:</strong> +100 if Omnara reports <code>work_status=AWAITING_INPUT</code>. Otherwise +10 if last sender is the agent (so it expects a reply), then +2 per "?/你拍/should I/要不要/let me know" hit, +1 per softer hit ("review/想/选"). Plus a recency bonus (≤30m: +15, ≤1h: +8, ≤4h: +3). Cap shown below. Click any card → opens that session in Omnara dashboard.
+</div>
+
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="filter by name / branch / model..." oninput="filterAll()" />
+  <span class="muted">tip: <code>opt+click</code> the URL to copy without opening</span>
+</div>
+
+<h2>🚨 Urgent — agent explicitly waiting</h2>
+<div id="urgent"></div>
+<h2>🔥 Likely needs your decision</h2>
+<div id="likely"></div>
+<h2>💭 Maybe waiting (lower confidence)</h2>
+<div id="maybe"></div>
+<h2>✅ Idle — probably fine</h2>
+<div id="idle"></div>
+
+<footer>
+generated by Claude · raw data embedded · <a href="#" onclick="const r=document.getElementById('raw');r.style.display=r.style.display==='block'?'none':'block';return false">show raw triage data ▾</a>
+<pre id="raw" style="display:none;max-height:300px;overflow:auto;font-size:10px;background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:12px;"></pre>
+</footer>
+
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const data = JSON.parse(document.getElementById('data').textContent);
+document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
+document.getElementById('now').textContent = data.snapshot_at.replace('T',' ').slice(0,19) + ' UTC';
+document.getElementById('total').textContent = data.total_sessions;
+const m = data.machines.machines[0];
+document.getElementById('machine').innerHTML = `<code>${m.hostname}</code> · daemon ${m.daemon_version} · ${m.status}`;
+
+const buckets = data.buckets;
+const counts = {urgent:buckets.awaiting.length, likely:buckets.likely_question.length, maybe:buckets.maybe_question.length, idle:buckets.idle.length+buckets.agent_should_respond.length};
+
+const kpis = document.getElementById('kpis');
+const total = counts.urgent + counts.likely + counts.maybe + counts.idle;
+kpis.innerHTML = `
+  <div class="kpi urgent"><div class="l">awaiting input</div><div class="v">${counts.urgent}</div><div class="muted">explicit AWAITING_INPUT</div></div>
+  <div class="kpi high"><div class="l">likely question</div><div class="v">${counts.likely}</div><div class="muted">agent ended with "?" / "你拍" / "should I"</div></div>
+  <div class="kpi medium"><div class="l">maybe waiting</div><div class="v">${counts.maybe}</div><div class="muted">softer signals</div></div>
+  <div class="kpi idle"><div class="l">probably fine</div><div class="v">${counts.idle}</div><div class="muted">idle, no question</div></div>
+`;
+
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+function renderCard(r, kind){
+  const url = `https://www.omnara.com/dashboard/sessions/${r.usid}`;
+  const branch = r.branch ? ` · <code>${esc(r.branch)}</code>` : '';
+  const hits = (r.hits||[]).map(h=>`<span>${esc(h)}</span>`).join('');
+  return `
+    <div class="card ${kind}" data-name="${esc((r.name||'').toLowerCase())} ${esc((r.branch||'').toLowerCase())}">
+      <div class="row1">
+        <div class="nm">${esc(r.name||'(unnamed)')}</div>
+        <span class="score">score ${r.score}</span>
+        <span class="tag ${kind}">${kind}</span>
+        <span class="meta">${r.age_str} ago${branch}</span>
+      </div>
+      <div class="quote" id="q-${r.usid}">${esc(r.last_text||'(no text)')}</div>
+      <div class="actions">
+        <a class="go" href="${url}" target="_blank">open ↗</a>
+        <button class="expand" onclick="document.getElementById('q-${r.usid}').classList.toggle('expanded');this.textContent=this.textContent.includes('full')?'show less':'show full';">show full</button>
+        <a class="copy" href="${url}" onclick="navigator.clipboard.writeText('${url}');event.preventDefault();this.textContent='copied!';setTimeout(()=>this.textContent='copy URL',1200);return false;">copy URL</a>
+        <div class="hits">${hits}</div>
+      </div>
+    </div>`;
+}
+
+function render(){
+  const q = (document.getElementById('filter').value||'').toLowerCase();
+  function filt(arr){ return q ? arr.filter(r=>JSON.stringify(r).toLowerCase().includes(q)) : arr; }
+  document.getElementById('urgent').innerHTML = filt(buckets.awaiting).map(r=>renderCard(r,'urgent')).join('') || '<div class="muted" style="padding:8px 4px;">none — nothing explicitly blocked.</div>';
+  document.getElementById('likely').innerHTML = filt(buckets.likely_question).map(r=>renderCard(r,'high')).join('') || '<div class="muted" style="padding:8px 4px;">none</div>';
+  document.getElementById('maybe').innerHTML  = filt(buckets.maybe_question).map(r=>renderCard(r,'medium')).join('') || '<div class="muted" style="padding:8px 4px;">none</div>';
+  const idleAll = [...filt(buckets.idle), ...filt(buckets.agent_should_respond)];
+  document.getElementById('idle').innerHTML   = idleAll.map(r=>renderCard(r,'idle')).join('') || '<div class="muted" style="padding:8px 4px;">none</div>';
+}
+function filterAll(){ render(); }
+render();
+</script>
+</body>
+</html>
