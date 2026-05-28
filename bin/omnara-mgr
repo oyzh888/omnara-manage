@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE))
 from omnara_client import OmnaraClient, OmnaraError, load_accounts  # noqa: E402
 import triage as triage_mod  # noqa: E402
 import summarize as summarize_mod  # noqa: E402
+import cf_deploys  # noqa: E402
 
 
 # ---------- helpers ----------
@@ -160,6 +161,18 @@ def cmd_raw(c: OmnaraClient, args):
     _print_json(res)
 
 
+def cmd_cf_deploys(c: OmnaraClient, args):
+    import argparse as _ap
+    if args.subaction == "list":
+        cf_deploys.cmd_list(_ap.Namespace())
+    elif args.subaction == "prune":
+        cf_deploys.cmd_prune(_ap.Namespace(keep=args.keep, dry_run=not args.apply))
+    elif args.subaction == "delete":
+        if not args.deployment:
+            raise SystemExit("--id <deployment> required for delete")
+        cf_deploys.cmd_delete(_ap.Namespace(deployment=args.deployment))
+
+
 # ---------- triage ----------
 
 def _render_triage_html(data: dict, multi: bool = False) -> str:
@@ -193,6 +206,14 @@ def cmd_sync(c: OmnaraClient, args):
     print(f"🔍 triaging {len(clients)} accounts: {[c.alias for c in clients]}")
     data = triage_mod.triage_multi(clients)
 
+    # Will embed PATs after writing the JSON snapshot (so committed file never sees PATs).
+    embedded_pats = None
+    if args.embed_pats:
+        from omnara_client import load_accounts
+        accs = load_accounts()
+        embedded_pats = {a["alias"]: a["pat"] for a in accs}
+        print(f"🔓 will embed {len(accs)} PATs into the rendered HTML only (not committed JSON)")
+
     # Optional: LLM summaries
     if args.summarize:
         if not summarize_mod._has_api_key():
@@ -210,8 +231,11 @@ def cmd_sync(c: OmnaraClient, args):
     latest_path.write_text(json.dumps(data, indent=2, default=str))
     print(f"📝 wrote {snap_path.relative_to(repo_dir)} and data/latest.json")
 
-    # Render dashboard HTML
-    html = _render_triage_html(data, multi=True)
+    # Render dashboard HTML — only the HTML version carries the PATs (if requested)
+    data_for_html = dict(data)
+    if embedded_pats:
+        data_for_html["_embedded_pats"] = embedded_pats
+    html = _render_triage_html(data_for_html, multi=True)
     (site_dir / "index.html").write_text(html)
     # Mirror data/ into site/data/ as actual files (wrangler doesn't follow symlinks)
     site_data = site_dir / "data"
@@ -356,6 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
     psy.add_argument("--no-git", action="store_true", help="skip git commit/push")
     psy.add_argument("--summarize", action="store_true", help="add LLM one-liner summaries (needs ANTHROPIC_API_KEY)")
     psy.add_argument("--summarize-top", type=int, default=8, help="how many cards per bucket to summarize")
+    psy.add_argument("--embed-pats", action="store_true", help="embed all configured PATs into the page so browser can send messages directly. Only safe on private hosting.")
 
     pse = sp.add_parser("send", help="send a message into an existing session")
     pse.add_argument("usid")
@@ -377,6 +402,12 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("path")
     pr.add_argument("body", nargs="?", help="optional JSON body")
 
+    pcf = sp.add_parser("cf-deploys", help="manage Cloudflare Pages deployment history")
+    pcf.add_argument("subaction", choices=["list", "prune", "delete"], help="list / prune (--apply to actually delete) / delete <id>")
+    pcf.add_argument("--keep", type=int, default=3, help="prune: keep N newest non-aliased deployments")
+    pcf.add_argument("--apply", action="store_true", help="prune: actually delete (default is dry-run)")
+    pcf.add_argument("--id", dest="deployment", help="delete: deployment id or 8-char hash")
+
     return p
 
 
@@ -393,6 +424,7 @@ HANDLERS = {
     "ensure-workspace": cmd_ensure_workspace,
     "delete": cmd_delete,
     "raw": cmd_raw,
+    "cf-deploys": cmd_cf_deploys,
 }
 
 

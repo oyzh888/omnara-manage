@@ -42,7 +42,11 @@ h2 .count{font-size:12px;color:var(--mute);font-weight:400;}
 
 /* Filters */
 .filterbar{display:flex;gap:6px;margin:8px 0;flex-wrap:wrap;align-items:center;}
-.acct-pill,.sort-pill,.view-pill{padding:6px 12px;border-radius:14px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--panel);user-select:none;cursor:pointer;color:var(--fg);}
+.acct-pill,.sort-pill,.view-pill,.group-pill,.quick-pill{padding:6px 12px;border-radius:14px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--panel);user-select:none;cursor:pointer;color:var(--fg);}
+.quick-pill{background:transparent;color:var(--mute);}
+.quick-pill.active{background:#f59e0b22;color:var(--accent);border-color:var(--accent);}
+.group-pill{background:transparent;color:var(--mute);}
+.group-pill.active{color:var(--link);border-color:var(--link);}
 .acct-pill.active{background:#22c55e22;border-color:#22c55e88;color:var(--ok);}
 .acct-pill.dim{opacity:.5;}
 .sort-pill{background:transparent;color:var(--mute);}
@@ -180,10 +184,27 @@ footer{margin-top:24px;padding:14px 0;border-top:1px solid var(--border);color:v
   <input type="search" id="filter" placeholder="🔍 filter by name / branch / text..." oninput="render()" />
 </div>
 <div class="filterbar">
+  <span class="muted" style="font-size:11px;">quick:</span>
+  <span class="quick-pill" data-quick="blocked"   onclick="toggleQuick(this)">🔴 blocked</span>
+  <span class="quick-pill" data-quick="pinned"    onclick="toggleQuick(this)">📌 pinned</span>
+  <span class="quick-pill" data-quick="recent"    onclick="toggleQuick(this)">⚡ &lt;30m</span>
+  <span class="quick-pill" data-quick="today"     onclick="toggleQuick(this)">📅 &lt;24h</span>
+  <span class="quick-pill" data-quick="stale"     onclick="toggleQuick(this)">🦴 &gt;3d</span>
+  <span class="quick-pill" data-quick="trading"   onclick="toggleQuick(this)">💹 trading</span>
+  <span class="quick-pill" data-quick="tesco"     onclick="toggleQuick(this)">🛒 tesco</span>
+  <span class="quick-pill" data-quick="training"  onclick="toggleQuick(this)">🧠 training/RL</span>
+  <span class="quick-pill" data-quick="omnara"    onclick="toggleQuick(this)">🤖 omnara/skill</span>
+  <span class="quick-pill" data-quick="house"     onclick="toggleQuick(this)">🏠 housing/visa</span>
+</div>
+<div class="filterbar">
   <span class="muted" style="font-size:11px;">sort:</span>
   <span class="sort-pill active" data-sort="smart" onclick="setSort(this)">📌 smart</span>
   <span class="sort-pill" data-sort="recent" onclick="setSort(this)">⏱️ recent</span>
   <span class="sort-pill" data-sort="score" onclick="setSort(this)">🔥 score</span>
+  <span class="muted" style="font-size:11px;margin-left:8px;">group:</span>
+  <span class="group-pill active" data-group="bucket"  onclick="setGroup(this)">by bucket</span>
+  <span class="group-pill" data-group="project" onclick="setGroup(this)">by project</span>
+  <span class="group-pill" data-group="machine" onclick="setGroup(this)">by machine</span>
   <span style="flex:1"></span>
   <span class="muted" style="font-size:11px;">view:</span>
   <span class="view-pill" data-view="full" onclick="setView(this)">full</span>
@@ -191,19 +212,20 @@ footer{margin-top:24px;padding:14px 0;border-top:1px solid var(--border);color:v
   <span class="view-pill" data-view="compact" onclick="setView(this)">compact</span>
 </div>
 
-<div class="legend">
-  <strong>Batch reply mode:</strong> click <code>reply</code> on any card, type your answer, click <code>stage</code> (don't send yet). Repeat across many cards. Then click <strong>📤 Send all staged</strong> at the bottom — every reply fires in parallel via the Omnara API.
-  Or, after staging, click <strong>📋 Copy as command</strong> to copy a one-liner Steve can paste into a Claude session ("here's my batch feedback, fire it off").
+<div class="legend" id="legend">
+  <strong>Batch reply mode:</strong> click <code>reply</code> on any card, type your answer, <code>stage</code>. Repeat across many cards.
+  Then click <strong>📤 Send all</strong> — every reply fires in parallel against the Omnara API.
+  Or click <strong>📋 Copy as command</strong> to grab a shell block to paste elsewhere.
+  <span id="patStatus" style="margin-left:8px;"></span>
 </div>
 
-<h2>🚨 Urgent <span class="count" id="cnt-urgent"></span></h2>
-<div id="urgent"></div>
-<h2>🔥 Likely needs your decision <span class="count" id="cnt-likely"></span></h2>
-<div id="likely"></div>
-<h2>💭 Maybe waiting <span class="count" id="cnt-maybe"></span></h2>
-<div id="maybe"></div>
-<h2>✅ Idle <span class="count" id="cnt-idle"></span></h2>
-<div id="idle"></div>
+<div id="sections">
+  <!-- by-bucket default rendering. Replaced when group changes. -->
+  <h2>🚨 Urgent <span class="count" id="cnt-urgent"></span></h2><div id="urgent"></div>
+  <h2>🔥 Likely needs your decision <span class="count" id="cnt-likely"></span></h2><div id="likely"></div>
+  <h2>💭 Maybe waiting <span class="count" id="cnt-maybe"></span></h2><div id="maybe"></div>
+  <h2>✅ Idle <span class="count" id="cnt-idle"></span></h2><div id="idle"></div>
+</div>
 
 <details>
 <summary>🖥️ Machines (<span id="machineCount">0</span>)</summary>
@@ -250,6 +272,21 @@ const accounts = data.accounts || [];
 const activeAccounts = new Set(accounts.filter(a=>!a.error).map(a=>a.account));
 let currentSort = 'smart';
 let currentView = 'cozy';
+let currentGroup = 'bucket';
+const activeQuick = new Set();  // quick-filter chips currently on
+
+// Topic detection regexes — used by quick-filter and "by project" group
+const TOPICS = [
+  ['trading',  /trad|期权|波动|iron condor|alpha|arb|sharp|momentum|stat arb|stock|纳斯达克|invest|spx|btc|crypto/i],
+  ['tesco',    /tesco|wiki tesco|cluster.{0,5}explor|prd|caption.{0,5}sku/i],
+  ['training', /train|grpo|rl[\s_-]|pluto|gpu|h200|h100|model.{0,5}compari|qwen|caption|fine.{0,3}tune|lora|sft/i],
+  ['omnara',   /omnara|skill|claude\.md|claude-code|tracker|dashboard/i],
+  ['house',    /visa|h-?1b|h1b|签证|买房|hous|mortgage|rental|property/i],
+];
+function topicsOf(r){
+  const blob = ((r.name||'')+' '+(r.branch||'')+' '+(r.last_text||'')).toLowerCase();
+  return TOPICS.filter(([k,re])=>re.test(blob)).map(([k])=>k);
+}
 
 // staged replies: usid -> {usid, asid, name, account, text}
 const staged = new Map();
@@ -315,6 +352,7 @@ function renderCard(r, kind){
       <div class="row1">
         <div class="nm">${pinIcon}${esc(r.name||'(unnamed)')}</div>
         ${acctTag}
+        ${r.has_interaction_request ? '<span class="tag urgent">🔴 BLOCKED on you</span>' : ''}
         <span class="score-badge">${r.score}</span>
         <span class="tag ${kind}">${kind}</span>
         <span class="meta">${esc(r.age_str)} ago${branchHTML}</span>
@@ -346,26 +384,26 @@ function renderCard(r, kind){
 
 // Single delegated click handler — robust to any name/quotes
 document.addEventListener('click', e=>{
+  // (a) action buttons inside cards
   const btn = e.target.closest('[data-act]');
-  if(!btn) return;
-  const card = btn.closest('.card');
-  if(!card) return;
-  const usid = card.dataset.usid;
-  const asid = card.dataset.asid;
-  const account = card.dataset.account;
-  const all = [].concat(...Object.values(data.buckets));
-  const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
-  const act = btn.dataset.act;
-  if(act==='reply' || act==='cancel') toggleReply(usid);
-  else if(act==='stage') stage(usid, r.name||'', account, asid);
-});
-
-// Click on user-ctx box to expand/collapse
-document.addEventListener('click', e=>{
+  if(btn){
+    const card = btn.closest('.card');
+    if(!card) return;
+    const usid = card.dataset.usid;
+    const asid = card.dataset.asid;
+    const account = card.dataset.account;
+    const all = [].concat(...Object.values(data.buckets));
+    const r = all.find(x=>x.usid===usid) || {usid, asid, account, name:''};
+    const act = btn.dataset.act;
+    if(act==='reply' || act==='cancel') toggleReply(usid);
+    else if(act==='stage') stage(usid, r.name||'', account, asid);
+    else if(act==='unstage') unstage(usid);
+    else if(act==='send') sendOne(usid, asid);
+    return;
+  }
+  // (b) clicking the user-ctx bubble toggles expand
   const ctx = e.target.closest('.md.user-ctx');
   if(ctx) ctx.classList.toggle('expanded');
-  else if(act==='unstage') unstage(usid);
-  else if(act==='send') sendOne(usid, asid);
 });
 
 function setSort(el){
@@ -400,37 +438,134 @@ function toggleAcct(name){
   renderAcctBar();
 }
 
+function passQuick(r){
+  // record passes if every active quick filter matches it
+  for(const k of activeQuick){
+    if(k==='blocked'  && !r.has_interaction_request && r.work_status!=='AWAITING_INPUT') return false;
+    if(k==='pinned'   && !r.pinned) return false;
+    if(k==='recent'   && (ageMs(r) > 30)) return false;
+    if(k==='today'    && (ageMs(r) > 60*24)) return false;
+    if(k==='stale'    && (ageMs(r) < 60*24*3)) return false;
+    // topic-based
+    if(['trading','tesco','training','omnara','house'].includes(k)){
+      if(!topicsOf(r).includes(k)) return false;
+    }
+  }
+  return true;
+}
+
+function bucketKindOf(r){
+  // mirror server-side bucket_of(), used for "by project / machine" group
+  if(r.has_interaction_request || r.work_status==='AWAITING_INPUT') return 'urgent';
+  if(r.score >= 30) return 'high';
+  if(r.score >= 15 && r.last_sender==='agent_session') return 'medium';
+  return 'idle';
+}
+
+function flatAll(){
+  const b = data.buckets || {};
+  return [...(b.awaiting||[]), ...(b.likely_question||[]), ...(b.maybe_question||[]), ...(b.agent_should_respond||[]), ...(b.idle||[])];
+}
+
 function render(){
   const q = (document.getElementById('filter').value||'').toLowerCase();
   function filt(arr){
     return arr.filter(r =>
       activeAccounts.has(r.account||'personal') &&
+      passQuick(r) &&
       (q ? ((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')+' '+(r.last_text||'')).toLowerCase().includes(q) : true)
     );
   }
-  const buckets = data.buckets;
-  const urgent = applySort(filt(buckets.awaiting||[]));
-  const likely = applySort(filt(buckets.likely_question||[]));
-  const maybe = applySort(filt(buckets.maybe_question||[]));
-  const idle = applySort([...filt(buckets.idle||[]), ...filt(buckets.agent_should_respond||[])]);
+  const sections = document.getElementById('sections');
 
-  document.getElementById('urgent').innerHTML = urgent.map(r=>renderCard(r,'urgent')).join('') || '<div class="muted" style="padding:6px;">none — nothing explicitly blocked.</div>';
-  document.getElementById('likely').innerHTML = likely.map(r=>renderCard(r,'high')).join('') || '<div class="muted" style="padding:6px;">none</div>';
-  document.getElementById('maybe').innerHTML  = maybe.map(r=>renderCard(r,'medium')).join('') || '<div class="muted" style="padding:6px;">none</div>';
-  document.getElementById('idle').innerHTML   = idle.map(r=>renderCard(r,'idle')).join('') || '<div class="muted" style="padding:6px;">none</div>';
-
-  document.getElementById('cnt-urgent').textContent = `(${urgent.length})`;
-  document.getElementById('cnt-likely').textContent = `(${likely.length})`;
-  document.getElementById('cnt-maybe').textContent = `(${maybe.length})`;
-  document.getElementById('cnt-idle').textContent = `(${idle.length})`;
-
-  document.getElementById('kpis').innerHTML = `
-    <div class="kpi urgent"><div class="v">${urgent.length}</div><div class="l">awaiting</div></div>
-    <div class="kpi high"><div class="v">${likely.length}</div><div class="l">likely 🔥</div></div>
-    <div class="kpi medium"><div class="v">${maybe.length}</div><div class="l">maybe 💭</div></div>
-    <div class="kpi idle"><div class="v">${idle.length}</div><div class="l">idle ✅</div></div>
-  `;
+  if(currentGroup === 'bucket'){
+    const buckets = data.buckets;
+    const urgent = applySort(filt(buckets.awaiting||[]));
+    const likely = applySort(filt(buckets.likely_question||[]));
+    const maybe = applySort(filt(buckets.maybe_question||[]));
+    const idle = applySort([...filt(buckets.idle||[]), ...filt(buckets.agent_should_respond||[])]);
+    const renderBlock = (title, items, kind, emptyMsg) =>
+      `<h2>${title} <span class="count">(${items.length})</span></h2>
+       <div>${items.map(r=>renderCard(r,kind)).join('') || `<div class="muted" style="padding:6px;">${emptyMsg||'none'}</div>`}</div>`;
+    sections.innerHTML =
+      renderBlock('🚨 Urgent — agent blocked on you', urgent, 'urgent', 'none — nothing explicitly blocked') +
+      renderBlock('🔥 Likely needs your decision', likely, 'high') +
+      renderBlock('💭 Maybe waiting', maybe, 'medium') +
+      renderBlock('✅ Idle', idle, 'idle');
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi urgent"><div class="v">${urgent.length}</div><div class="l">awaiting</div></div>
+      <div class="kpi high"><div class="v">${likely.length}</div><div class="l">likely 🔥</div></div>
+      <div class="kpi medium"><div class="v">${maybe.length}</div><div class="l">maybe 💭</div></div>
+      <div class="kpi idle"><div class="v">${idle.length}</div><div class="l">idle ✅</div></div>
+    `;
+  }
+  else if(currentGroup === 'project'){
+    const all = applySort(filt(flatAll()));
+    const groups = new Map();   // topic -> [r,...]
+    const noTopic = [];
+    for(const r of all){
+      const ts = topicsOf(r);
+      if(ts.length === 0) noTopic.push(r);
+      else for(const t of ts){
+        if(!groups.has(t)) groups.set(t, []);
+        groups.get(t).push(r);
+      }
+    }
+    // Order groups by total urgency (sum of scores) desc
+    const ordered = [...groups.entries()].sort((a,b)=> {
+      const sa = a[1].reduce((s,r)=>s+r.score,0);
+      const sb = b[1].reduce((s,r)=>s+r.score,0);
+      return sb - sa;
+    });
+    const labels = {trading:'💹 Trading', tesco:'🛒 Tesco', training:'🧠 Training / RL', omnara:'🤖 Omnara / skill', house:'🏠 Housing / visa'};
+    let html = '';
+    for(const [t, items] of ordered){
+      html += `<h2>${labels[t]||t} <span class="count">(${items.length})</span></h2>
+        <div>${items.map(r=>renderCard(r, bucketKindOf(r))).join('')}</div>`;
+    }
+    if(noTopic.length){
+      html += `<h2>📦 Other <span class="count">(${noTopic.length})</span></h2>
+        <div>${noTopic.map(r=>renderCard(r, bucketKindOf(r))).join('')}</div>`;
+    }
+    sections.innerHTML = html || '<div class="muted" style="padding:8px;">no matches</div>';
+    document.getElementById('kpis').innerHTML = ordered.map(([t,items])=>
+      `<div class="kpi"><div class="v">${items.length}</div><div class="l">${(labels[t]||t).replace(/^[^ ]+ /,'')}</div></div>`
+    ).join('') || '<div class="kpi"><div class="v">0</div><div class="l">no matches</div></div>';
+  }
+  else if(currentGroup === 'machine'){
+    // Group by hostname (via session.metadata.hostname or first matching machine).
+    // We don't have a direct mapping in the JSON; fall back to grouping by account for now.
+    const all = applySort(filt(flatAll()));
+    const groups = new Map();
+    for(const r of all){
+      const k = r.account || 'unknown';
+      if(!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    let html = '';
+    for(const [k, items] of [...groups.entries()].sort((a,b)=>b[1].length-a[1].length)){
+      html += `<h2>@${k} <span class="count">(${items.length})</span></h2>
+        <div>${items.map(r=>renderCard(r, bucketKindOf(r))).join('')}</div>`;
+    }
+    sections.innerHTML = html;
+    document.getElementById('kpis').innerHTML = [...groups.entries()].map(([k,items])=>
+      `<div class="kpi"><div class="v">${items.length}</div><div class="l">@${k}</div></div>`
+    ).join('');
+  }
   updateBatchBar();
+}
+
+function setGroup(el){
+  document.querySelectorAll('.group-pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  currentGroup = el.dataset.group;
+  render();
+}
+function toggleQuick(el){
+  const k = el.dataset.quick;
+  if(activeQuick.has(k)){ activeQuick.delete(k); el.classList.remove('active'); }
+  else { activeQuick.add(k); el.classList.add('active'); }
+  render();
 }
 
 // ----- staging / batch -----
@@ -476,24 +611,38 @@ function updateBatchBar(){
 //     we call POST /api/v1/user-sessions/{usid}/agent-sessions/{asid}/messages directly.
 // (2) Fallback: print a curl/CLI block and ask Steve to run it.
 function getPat(account){
+  // 1. embedded by sync --embed-pats (preferred — zero setup)
+  if(data._embedded_pats && data._embedded_pats[account]) return data._embedded_pats[account];
+  // 2. localStorage fallback for power users
   return localStorage.getItem('omnara_pat_'+account);
 }
+// Use the same-origin proxy mounted at /api/proxy/* (Cloudflare Pages Function).
+// Direct calls to api.omnara.com fail CORS preflight (it returns 400 + no Access-Control-Allow-Origin).
+const API_BASE = '/api/proxy/api/v1';
+
 async function postMessage(account, usid, asid, text){
   const pat = getPat(account);
   if(!pat){
     return {ok:false, error:'no_pat', cli:`omnara-mgr send ${usid} ${JSON.stringify(text)}  # @${account}`};
   }
   const body = JSON.stringify({text});
-  const r = await fetch(`https://api.omnara.com/api/v1/user-sessions/${usid}/agent-sessions/${asid}/messages`, {
-    method:'POST',
-    headers:{'Authorization':'Bearer '+pat,'Content-Type':'application/json'},
-    body
-  });
+  let r;
+  try{
+    r = await fetch(`${API_BASE}/user-sessions/${usid}/agent-sessions/${asid}/messages`, {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+pat,'Content-Type':'application/json'},
+      body
+    });
+  } catch(e){
+    return {ok:false, error:`network: ${e.message||e}`};
+  }
   if(r.ok){
     const j = await r.json();
     return {ok:true, message_id:j.message_id};
   }
-  return {ok:false, error:`HTTP ${r.status}`, body:await r.text()};
+  let errBody = '';
+  try{ errBody = await r.text(); }catch{}
+  return {ok:false, error:`HTTP ${r.status}`, body:errBody};
 }
 async function sendOne(usid, asidArg){
   let entry = staged.get(usid);
@@ -592,6 +741,19 @@ document.getElementById('machines').innerHTML = ms.map(m=>{
   const flag = m.status==='ONLINE' ? '🟢' : '⚫';
   return `<div class="machine ${cls}"><div class="h">${flag} ${esc(m.hostname||'?')}</div><div class="s">daemon ${m.daemon_version||'?'} · ${(m.last_seen_at||'?').slice(0,19)}</div></div>`;
 }).join('');
+
+// PAT status indicator
+(function(){
+  const el = document.getElementById('patStatus');
+  if(!el) return;
+  const haveEmbed = !!(data._embedded_pats && Object.keys(data._embedded_pats).length);
+  if(haveEmbed){
+    const accs = Object.keys(data._embedded_pats);
+    el.innerHTML = `<span class="tag" style="background:#22c55e22;color:var(--ok)">🔓 PAT embedded · direct send ON (${accs.map(a=>'@'+a).join(', ')})</span>`;
+  } else {
+    el.innerHTML = `<span class="tag" style="background:#fbbf2422;color:var(--warn)">PAT not embedded — Send All will produce a CLI block. Run <code>omnara-mgr sync --embed-pats</code> for direct send.</span>`;
+  }
+})();
 
 renderAcctBar();
 render();
