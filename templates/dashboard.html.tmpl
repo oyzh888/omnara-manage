@@ -2,144 +2,360 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Steve's Omnara Fleet Dashboard</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Steve's Omnara Fleet</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=2" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📋</text></svg>" />
+<script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
-:root{--bg:#0e1116;--panel:#161b22;--border:#30363d;--fg:#e6edf3;--mute:#8b949e;--accent:#f59e0b;--ok:#86efac;--warn:#fbbf24;--err:#ef4444;--link:#7dd3fc;--mono:ui-monospace,Menlo,Consolas,monospace;}
-*{box-sizing:border-box}
-body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);}
-.wrap{max-width:1100px;margin:0 auto;padding:20px;}
-header{padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;}
-header h1{margin:0;font-size:22px;}
-header .lede{color:var(--mute);font-size:12px;margin-top:4px;}
-header .meta{color:var(--mute);font-size:11px;font-family:var(--mono);text-align:right;}
-header .meta a{color:var(--link);}
-h2{margin:24px 0 10px;font-size:16px;color:var(--accent);}
+:root{
+  --bg:#0e1116;--panel:#161b22;--panel2:#1c2128;--border:#30363d;--fg:#e6edf3;--mute:#8b949e;
+  --accent:#f59e0b;--ok:#86efac;--warn:#fbbf24;--err:#ef4444;--link:#7dd3fc;
+  --mono:ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);overflow-x:hidden;}
+a{color:var(--link);}
+button{font:inherit;cursor:pointer;}
 
-.acct-bar{display:flex;gap:8px;margin:8px 0 14px;flex-wrap:wrap;}
-.acct{padding:5px 12px;border-radius:14px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--panel);cursor:pointer;user-select:none;}
-.acct.active{background:#22c55e22;border-color:#22c55e88;color:var(--ok);}
-.acct.dim{opacity:.5;}
+/* Layout */
+.wrap{max-width:1100px;margin:0 auto;padding:14px 14px 80px;}
+@media(min-width:900px){.wrap{padding:20px 20px 100px;}}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px;}
+header h1{margin:0;font-size:18px;}
+@media(min-width:600px){header h1{font-size:22px;}}
+header .lede{color:var(--mute);font-size:11px;margin-top:2px;}
+header .meta{color:var(--mute);font-size:10px;font-family:var(--mono);text-align:right;line-height:1.6;}
+h2{margin:18px 0 8px;font-size:15px;color:var(--accent);display:flex;align-items:center;gap:8px;}
+h2 .count{font-size:12px;color:var(--mute);font-weight:400;}
 
-.top{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0;}
-.kpi{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
-.kpi .v{font-size:22px;font-weight:600;}
-.kpi .l{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0;}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 10px;text-align:center;}
+.kpi .v{font-size:20px;font-weight:700;line-height:1;}
+.kpi .l{color:var(--mute);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-top:3px;}
 .kpi.urgent{border-color:#ef444466;background:linear-gradient(135deg,#ef444415,var(--panel));}
 .kpi.high{border-color:#fbbf2466;background:linear-gradient(135deg,#fbbf2410,var(--panel));}
 .kpi.medium{border-color:#7dd3fc66;}
-.kpi.idle{border-color:var(--border);opacity:.7;}
+.kpi.idle{opacity:.7;}
 
-.tag{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-family:var(--mono);font-weight:500;}
+/* Filters */
+.filterbar{display:flex;gap:6px;margin:8px 0;flex-wrap:wrap;align-items:center;}
+.acct-pill,.sort-pill,.view-pill{padding:6px 12px;border-radius:14px;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--panel);user-select:none;cursor:pointer;color:var(--fg);}
+.acct-pill.active{background:#22c55e22;border-color:#22c55e88;color:var(--ok);}
+.acct-pill.dim{opacity:.5;}
+.sort-pill{background:transparent;color:var(--mute);}
+.sort-pill.active{color:var(--accent);border-color:var(--accent);}
+.view-pill{background:#161b22;color:var(--mute);}
+.view-pill.active{background:var(--link);color:var(--bg);font-weight:600;border-color:var(--link);}
+input[type=text],input[type=search]{background:#0d1117;border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:18px;font-family:inherit;font-size:13px;flex:1;min-width:120px;-webkit-appearance:none;}
+input[type=text]:focus,input[type=search]:focus{outline:none;border-color:var(--link);}
+
+/* Tags */
+.tag{display:inline-block;padding:2px 7px;border-radius:8px;font-size:10px;font-family:var(--mono);font-weight:500;line-height:1.4;white-space:nowrap;}
 .tag.urgent{background:#ef444433;color:#fca5a5;}
 .tag.high{background:#fbbf2433;color:#fde68a;}
 .tag.medium{background:#7dd3fc33;color:var(--link);}
 .tag.idle{background:#30363d;color:var(--mute);}
-.tag.acct{font-family:var(--mono);font-weight:600;}
+.tag.acct{font-weight:600;}
+.score-badge{font-family:var(--mono);background:#0d1117;border:1px solid var(--border);padding:2px 6px;border-radius:8px;font-size:10px;color:var(--accent);}
 
-.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:8px 0;border-left:3px solid var(--mute);}
-.card.urgent{border-left-color:#ef4444;background:linear-gradient(90deg,#ef444408,var(--panel) 30%);}
+/* Card */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:8px 0;border-left:3px solid var(--mute);}
+.card.urgent{border-left-color:#ef4444;}
 .card.high{border-left-color:#fbbf24;}
 .card.medium{border-left-color:#7dd3fc;}
 .card.idle{border-left-color:var(--mute);opacity:.85;}
-.card .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;}
-.card .nm{font-weight:600;font-size:13px;flex:1;min-width:200px;}
-.card .meta{font-family:var(--mono);font-size:11px;color:var(--mute);}
-.card .quote{background:#0d1117;border:1px solid var(--border);border-radius:5px;padding:8px 10px;margin:6px 0 4px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#cbd5e1;font-family:var(--mono);max-height:200px;overflow:auto;}
-.card .quote.expanded{max-height:none;}
-.card .summary{font-size:12px;color:var(--ok);background:#22c55e11;border:1px solid #22c55e44;border-radius:5px;padding:6px 10px;margin:4px 0;font-style:italic;}
-.card .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;}
-.card a.go{background:var(--link);color:var(--bg);padding:4px 10px;border-radius:5px;font-weight:600;font-size:11px;text-decoration:none;}
-.card button.expand{background:transparent;border:1px solid var(--border);color:var(--mute);padding:4px 8px;border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit;}
-.card .hits{display:flex;gap:3px;flex-wrap:wrap;}
-.card .hits span{background:#0d1117;border:1px solid var(--border);color:var(--mute);font-family:var(--mono);font-size:10px;padding:1px 4px;border-radius:3px;}
-.score{font-family:var(--mono);background:#0d1117;border:1px solid var(--border);padding:1px 5px;border-radius:6px;font-size:10px;color:var(--accent);}
+.card.pinned{border-left-color:var(--accent) !important;background:linear-gradient(90deg,#f59e0b08,var(--panel) 30%);}
+.card .row1{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.card .nm{font-weight:600;font-size:13.5px;flex:1;min-width:0;word-break:break-word;}
+.card .meta{font-family:var(--mono);font-size:10px;color:var(--mute);}
+.card .summary{font-size:12px;color:var(--ok);background:#22c55e11;border:1px solid #22c55e44;border-radius:6px;padding:6px 10px;margin:4px 0;line-height:1.4;}
 
-.toolbar{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap;}
-input[type=text]{background:#0d1117;border:1px solid var(--border);color:var(--fg);padding:5px 9px;border-radius:5px;font-family:var(--mono);font-size:12px;flex:1;min-width:180px;}
+/* Markdown content */
+.md{font-size:13px;line-height:1.55;color:#cbd5e1;background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:6px 0 4px;max-height:220px;overflow:auto;word-break:break-word;}
+.md.expanded{max-height:none;}
+.md p{margin:0 0 8px;}
+.md p:last-child{margin-bottom:0;}
+.md h1,.md h2,.md h3,.md h4{margin:8px 0 4px;color:var(--fg);font-size:14px;}
+.md h1{font-size:15px;border-bottom:1px solid var(--border);padding-bottom:2px;}
+.md ul,.md ol{margin:4px 0 8px;padding-left:20px;}
+.md li{margin:2px 0;}
+.md code{background:var(--panel2);padding:1px 5px;border-radius:3px;font-size:11.5px;font-family:var(--mono);color:var(--ok);word-break:break-all;}
+.md pre{background:var(--panel2);border:1px solid var(--border);border-radius:5px;padding:8px 10px;overflow-x:auto;margin:6px 0;}
+.md pre code{background:transparent;padding:0;color:var(--fg);font-size:11px;}
+.md blockquote{border-left:2px solid var(--border);padding-left:10px;margin:6px 0;color:var(--mute);}
+.md table{border-collapse:collapse;font-size:11px;margin:6px 0;display:block;overflow-x:auto;}
+.md th,.md td{border:1px solid var(--border);padding:3px 6px;}
+.md th{background:var(--panel2);}
+.md a{color:var(--link);}
+.md strong{color:var(--fg);}
+.md hr{border:0;border-top:1px solid var(--border);margin:8px 0;}
 
-.legend{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:8px 0;font-size:11px;color:var(--mute);}
-.legend code{background:#0d1117;padding:1px 4px;border-radius:3px;color:var(--fg);}
-footer{margin-top:36px;padding:18px 0;border-top:1px solid var(--border);color:var(--mute);font-size:11px;}
+/* Card actions + reply */
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+.btn{background:transparent;border:1px solid var(--border);color:var(--fg);padding:6px 12px;border-radius:6px;font-size:11px;font-family:inherit;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px;}
+.btn.primary{background:var(--link);color:var(--bg);font-weight:600;border-color:var(--link);}
+.btn.success{background:var(--ok);color:var(--bg);font-weight:600;border-color:var(--ok);}
+.btn:hover{filter:brightness(1.1);}
+.btn:active{transform:scale(.97);}
+.btn.disabled{opacity:.5;pointer-events:none;}
 
-.machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;margin:6px 0;}
+.reply{margin-top:8px;border-top:1px dashed var(--border);padding-top:8px;display:none;}
+.reply.open{display:block;}
+.reply textarea{width:100%;background:#0d1117;border:1px solid var(--border);color:var(--fg);padding:10px;border-radius:6px;font:inherit;font-size:13px;resize:vertical;min-height:64px;-webkit-appearance:none;}
+.reply textarea:focus{outline:none;border-color:var(--link);}
+.reply .row{display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap;}
+.reply .hint{font-size:10px;color:var(--mute);font-family:var(--mono);}
+.reply.staged{background:#22c55e11;border-radius:6px;padding-bottom:6px;}
+
+.hits{display:flex;gap:3px;flex-wrap:wrap;}
+.hits span{background:#0d1117;border:1px solid var(--border);color:var(--mute);font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:3px;}
+
+/* Compact view */
+.compact .card{padding:8px 10px;margin:4px 0;}
+.compact .card .md{max-height:80px;}
+.compact .card .row1{margin-bottom:2px;}
+.compact .card .nm{font-size:12.5px;}
+
+/* List view (super-compact stream of cards on mobile) */
+.list-view .card{margin:6px 0;}
+
+/* Bottom batch bar */
+.batchbar{position:fixed;bottom:0;left:0;right:0;background:rgba(14,17,22,.96);backdrop-filter:blur(12px);border-top:1px solid var(--border);padding:10px 14px;z-index:100;display:none;}
+.batchbar.open{display:block;}
+.batchbar .inner{max-width:1100px;margin:0 auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.batchbar .count{font-size:13px;font-weight:600;color:var(--ok);}
+.batchbar .out{flex:1;min-width:200px;background:#0d1117;border:1px solid var(--border);color:var(--mute);padding:6px 10px;border-radius:6px;font-family:var(--mono);font-size:11px;max-height:80px;overflow:auto;white-space:pre-wrap;}
+
+/* Machines */
+.machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;margin:6px 0;}
 .machine{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:6px 9px;font-size:11px;}
 .machine.online{border-left:2px solid #22c55e;}
 .machine.offline{opacity:.5;}
-.machine .h{font-family:var(--mono);font-size:11px;color:var(--fg);}
+.machine .h{font-family:var(--mono);font-size:11px;}
 .machine .s{color:var(--mute);font-size:10px;}
+
+/* Tiny details */
+.muted{color:var(--mute);}
+details{margin:8px 0;}
+summary{cursor:pointer;color:var(--mute);font-size:12px;}
+.legend{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin:8px 0;font-size:11px;color:var(--mute);}
+.legend code{background:#0d1117;padding:1px 4px;border-radius:3px;color:var(--fg);}
+footer{margin-top:24px;padding:14px 0;border-top:1px solid var(--border);color:var(--mute);font-size:11px;}
+
+/* Toast */
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ok);color:var(--bg);padding:8px 16px;border-radius:20px;font-weight:600;font-size:12px;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none;}
+.toast.show{opacity:1;}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="root">
 
 <header>
   <div>
-    <h1>📋 Steve's Omnara Fleet Dashboard</h1>
-    <div class="lede">All Omnara conversations across all machines, all accounts</div>
+    <h1>📋 Omnara Fleet</h1>
+    <div class="lede">All sessions across all accounts &amp; machines</div>
   </div>
   <div class="meta">
     snapshot <span id="now"></span><br>
-    <a href="https://github.com/oyzh888/omnara-tracker" target="_blank">github · oyzh888/omnara-tracker</a><br>
-    powered by <a href="https://github.com/oyzh888/omnara-manage" target="_blank">omnara-manage</a>
+    <a href="https://github.com/oyzh888/omnara-tracker" target="_blank">github</a> · <a id="rawLink" href="data/latest.json" target="_blank">raw json</a><br>
+    <a href="https://github.com/oyzh888/omnara-manage" target="_blank">omnara-manage</a>
   </div>
 </header>
 
-<div class="acct-bar" id="acctBar"></div>
+<div class="kpis" id="kpis"></div>
 
-<div class="top" id="kpis"></div>
+<div class="filterbar" id="acctBar"></div>
+<div class="filterbar">
+  <input type="search" id="filter" placeholder="🔍 filter by name / branch / text..." oninput="render()" />
+</div>
+<div class="filterbar">
+  <span class="muted" style="font-size:11px;">sort:</span>
+  <span class="sort-pill active" data-sort="smart" onclick="setSort(this)">📌 smart</span>
+  <span class="sort-pill" data-sort="recent" onclick="setSort(this)">⏱️ recent</span>
+  <span class="sort-pill" data-sort="score" onclick="setSort(this)">🔥 score</span>
+  <span style="flex:1"></span>
+  <span class="muted" style="font-size:11px;">view:</span>
+  <span class="view-pill" data-view="full" onclick="setView(this)">full</span>
+  <span class="view-pill active" data-view="cozy" onclick="setView(this)">cozy</span>
+  <span class="view-pill" data-view="compact" onclick="setView(this)">compact</span>
+</div>
 
 <div class="legend">
-  <strong>Bucketing:</strong>
-  +100 if Omnara reports <code>AWAITING_INPUT</code>;
-  +10 if last sender is the agent;
-  +2 per strong question signal (<code>?/你拍/should I/要不要</code>);
-  +1 per soft signal (<code>review/选/想</code>);
-  +recency bonus.
-  Click any card → opens that session in Omnara dashboard.
+  <strong>Batch reply mode:</strong> click <code>reply</code> on any card, type your answer, click <code>stage</code> (don't send yet). Repeat across many cards. Then click <strong>📤 Send all staged</strong> at the bottom — every reply fires in parallel via the Omnara API.
+  Or, after staging, click <strong>📋 Copy as command</strong> to copy a one-liner Steve can paste into a Claude session ("here's my batch feedback, fire it off").
 </div>
 
-<div class="toolbar">
-  <input type="text" id="filter" placeholder="filter by name / branch / account..." oninput="render()" />
-</div>
-
-<h2>🚨 Urgent — agent explicitly waiting</h2>
+<h2>🚨 Urgent <span class="count" id="cnt-urgent"></span></h2>
 <div id="urgent"></div>
-<h2>🔥 Likely needs your decision</h2>
+<h2>🔥 Likely needs your decision <span class="count" id="cnt-likely"></span></h2>
 <div id="likely"></div>
-<h2>💭 Maybe waiting (lower confidence)</h2>
+<h2>💭 Maybe waiting <span class="count" id="cnt-maybe"></span></h2>
 <div id="maybe"></div>
-<h2>✅ Idle — probably fine</h2>
+<h2>✅ Idle <span class="count" id="cnt-idle"></span></h2>
 <div id="idle"></div>
 
-<h2>🖥️ Machines</h2>
+<details>
+<summary>🖥️ Machines (<span id="machineCount">0</span>)</summary>
 <div class="machines" id="machines"></div>
+</details>
 
 <footer>
-  Static snapshot · regenerated by <code>omnara-mgr sync</code> · this URL is git/Pages backed (oyzh888/omnara-tracker → Cloudflare Pages).
-  <br>Raw JSON: <a id="rawLink" href="data/latest.json" target="_blank">data/latest.json</a> ·
-  <a href="#" onclick="const r=document.getElementById('raw');r.style.display=r.style.display==='block'?'none':'block';return false">show embedded data ▾</a>
-  <pre id="raw" style="display:none;max-height:300px;overflow:auto;font-size:10px;background:#0d1117;border:1px solid var(--border);border-radius:5px;padding:10px;"></pre>
+  Static snapshot · regenerated by <code>omnara-mgr sync</code>. CF Pages auto-deploys on every git push to <a href="https://github.com/oyzh888/omnara-tracker" target="_blank">oyzh888/omnara-tracker</a>.
 </footer>
 
 </div>
 
+<div class="batchbar" id="batchbar">
+  <div class="inner">
+    <div class="count" id="batchCount">0 staged</div>
+    <button class="btn" onclick="copyBatchAsCommand()">📋 Copy as command</button>
+    <button class="btn primary" onclick="sendAllStaged()">📤 Send all (<span id="batchCount2">0</span>)</button>
+    <button class="btn" onclick="clearStaged()">clear</button>
+    <div class="out" id="batchOut" style="display:none;"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <script id="data" type="application/json">__DATA__</script>
 <script>
+// ----- markdown setup -----
+marked.setOptions({breaks:true, gfm:true});
+function md(text){
+  if(!text) return '';
+  try{
+    return DOMPurify.sanitize(marked.parse(text), {ADD_ATTR:['target']});
+  }catch(e){
+    return text.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  }
+}
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+// ----- data -----
 const data = JSON.parse(document.getElementById('data').textContent);
-document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
 document.getElementById('now').textContent = data.snapshot_at.replace('T',' ').slice(0,19) + ' UTC';
 
-// Account toggles
 const accounts = data.accounts || [];
 const activeAccounts = new Set(accounts.filter(a=>!a.error).map(a=>a.account));
-const acctBar = document.getElementById('acctBar');
+let currentSort = 'smart';
+let currentView = 'cozy';
+
+// staged replies: usid -> {usid, asid, name, account, text}
+const staged = new Map();
+
+function accountColor(name){
+  for(const a of accounts) if(a.account===name) return a.tag_color || '#7dd3fc';
+  return '#7dd3fc';
+}
+
+function ageMs(r){
+  if(r._age_min !== undefined) return r._age_min;
+  // age_str like "12m", "1.5h", "2d"
+  const s = r.age_str || '';
+  let v = parseFloat(s);
+  if(s.endsWith('m')) r._age_min = v;
+  else if(s.endsWith('h')) r._age_min = v*60;
+  else if(s.endsWith('d')) r._age_min = v*60*24;
+  else r._age_min = 999999;
+  return r._age_min;
+}
+
+function smartSort(rows){
+  // pinned first, then score desc, then recency
+  return rows.slice().sort((a,b)=>{
+    const ap = a.pinned?1:0, bp = b.pinned?1:0;
+    if(bp-ap) return bp-ap;
+    if(b.score - a.score) return b.score - a.score;
+    return ageMs(a) - ageMs(b);
+  });
+}
+function recentSort(rows){
+  return rows.slice().sort((a,b)=>{
+    const ap = a.pinned?1:0, bp = b.pinned?1:0;
+    if(bp-ap) return bp-ap;
+    return ageMs(a) - ageMs(b);
+  });
+}
+function scoreSort(rows){
+  return rows.slice().sort((a,b)=>b.score-a.score);
+}
+function applySort(rows){
+  if(currentSort==='smart') return smartSort(rows);
+  if(currentSort==='recent') return recentSort(rows);
+  return scoreSort(rows);
+}
+
+// ----- rendering -----
+function renderCard(r, kind){
+  const url = `https://www.omnara.com/dashboard/sessions/${r.usid}`;
+  const branchHTML = r.branch ? ` · <code style="background:#0d1117;padding:1px 4px;border-radius:3px;">${esc(r.branch)}</code>` : '';
+  const hits = (r.hits||[]).map(h=>`<span>${esc(h)}</span>`).join('');
+  const acct = r.account || 'personal';
+  const acctTag = `<span class="tag acct" style="background:${esc(accountColor(acct))}33;color:${esc(accountColor(acct))}">@${esc(acct)}</span>`;
+  const summary = r.llm_summary ? `<div class="summary">💡 ${esc(r.llm_summary)}</div>` : '';
+  const isStaged = staged.has(r.usid);
+  const pinIcon = r.pinned ? '📌 ' : '';
+  const cls = (r.pinned ? 'pinned ' : '') + kind;
+
+  return `
+    <div class="card ${cls}" data-usid="${r.usid}" data-search="${esc(((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')+' '+(r.last_text||'')).toLowerCase())}">
+      <div class="row1">
+        <div class="nm">${pinIcon}${esc(r.name||'(unnamed)')}</div>
+        ${acctTag}
+        <span class="score-badge">${r.score}</span>
+        <span class="tag ${kind}">${kind}</span>
+        <span class="meta">${esc(r.age_str)} ago${branchHTML}</span>
+      </div>
+      ${summary}
+      <div class="md" id="md-${r.usid}">${md(r.last_text)}</div>
+      <div class="actions">
+        <a class="btn primary" href="${url}" target="_blank">open ↗</a>
+        <button class="btn" onclick="toggleReply('${r.usid}')">💬 reply</button>
+        <button class="btn" onclick="document.getElementById('md-${r.usid}').classList.toggle('expanded');this.textContent=this.textContent.includes('full')?'show less':'show full';">show full</button>
+        <div class="hits">${hits}</div>
+      </div>
+      <div class="reply ${isStaged?'open staged':''}" id="reply-${r.usid}">
+        <textarea id="ta-${r.usid}" placeholder="Your reply (will be sent as Steve, prefixed with [from omnara-manage])">${isStaged?esc(staged.get(r.usid).text):''}</textarea>
+        <div class="row">
+          ${isStaged
+            ? `<span class="tag" style="background:#22c55e22;color:var(--ok);">✅ staged</span>
+               <button class="btn" onclick="unstage('${r.usid}')">unstage</button>
+               <button class="btn primary" onclick="sendOne('${r.usid}')">send now</button>`
+            : `<button class="btn primary" onclick="stage('${r.usid}','${esc((r.name||'').replace(/'/g,'\\\\\\''))}','${r.account||'personal'}','${r.asid}')">📥 stage</button>
+               <button class="btn success" onclick="sendOne('${r.usid}','${r.asid}')">⚡ send now</button>
+               <button class="btn" onclick="toggleReply('${r.usid}')">cancel</button>`
+          }
+          <span class="hint">cmd/ctrl+enter to stage</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function setSort(el){
+  document.querySelectorAll('.sort-pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  currentSort = el.dataset.sort;
+  render();
+}
+function setView(el){
+  document.querySelectorAll('.view-pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  currentView = el.dataset.view;
+  document.getElementById('root').className = 'wrap ' + (currentView==='compact'?'compact':'') + (currentView==='full'?'':'');
+  render();
+}
+
 function renderAcctBar(){
-  acctBar.innerHTML = accounts.map(a=>{
+  const bar = document.getElementById('acctBar');
+  bar.innerHTML = accounts.map(a=>{
     const on = activeAccounts.has(a.account);
-    const counts = a.counts ? `(${a.total_sessions} · L${a.counts.likely_question} M${a.counts.maybe_question})` : (a.error ? `<span style="color:var(--err)">err</span>` : '');
-    return `<div class="acct ${on?'active':'dim'}" onclick="toggleAcct('${a.account}')">@${a.account} ${counts}</div>`;
+    const lbl = a.error
+      ? `<span style="color:var(--err)">err</span>`
+      : `(${a.total_sessions}, L${a.counts.likely_question})`;
+    return `<div class="acct-pill ${on?'active':'dim'}" onclick="toggleAcct('${a.account}')">@${a.account} ${lbl}</div>`;
   }).join('');
 }
 function toggleAcct(name){
@@ -149,78 +365,194 @@ function toggleAcct(name){
   renderAcctBar();
 }
 
-const buckets = data.buckets;
-
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-
-function renderCard(r, kind){
-  const url = `https://www.omnara.com/dashboard/sessions/${r.usid}`;
-  const branch = r.branch ? ` · <code>${esc(r.branch)}</code>` : '';
-  const hits = (r.hits||[]).map(h=>`<span>${esc(h)}</span>`).join('');
-  const acctTag = r.account ? `<span class="tag acct" style="background:${esc(accountColor(r.account))}33;color:${esc(accountColor(r.account))}">@${esc(r.account)}</span>` : '';
-  const summary = r.llm_summary ? `<div class="summary">💡 ${esc(r.llm_summary)}</div>` : '';
-  return `
-    <div class="card ${kind}" data-search="${esc(((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')).toLowerCase())}">
-      <div class="row1">
-        <div class="nm">${esc(r.name||'(unnamed)')}</div>
-        ${acctTag}
-        <span class="score">score ${r.score}</span>
-        <span class="tag ${kind}">${kind}</span>
-        <span class="meta">${r.age_str} ago${branch}</span>
-      </div>
-      ${summary}
-      <div class="quote" id="q-${r.usid}">${esc(r.last_text||'(no text)')}</div>
-      <div class="actions">
-        <a class="go" href="${url}" target="_blank">open ↗</a>
-        <button class="expand" onclick="document.getElementById('q-${r.usid}').classList.toggle('expanded');this.textContent=this.textContent.includes('full')?'show less':'show full';">show full</button>
-        <div class="hits">${hits}</div>
-      </div>
-    </div>`;
-}
-
-function accountColor(name){
-  for(const a of accounts){
-    if(a.account === name) return a.tag_color || '#7dd3fc';
-  }
-  return '#7dd3fc';
-}
-
 function render(){
   const q = (document.getElementById('filter').value||'').toLowerCase();
   function filt(arr){
     return arr.filter(r =>
       activeAccounts.has(r.account||'personal') &&
-      (q ? JSON.stringify(r).toLowerCase().includes(q) : true)
+      (q ? ((r.name||'')+' '+(r.branch||'')+' '+(r.account||'')+' '+(r.last_text||'')).toLowerCase().includes(q) : true)
     );
   }
-  const urgent = filt(buckets.awaiting||[]);
-  const likely = filt(buckets.likely_question||[]);
-  const maybe = filt(buckets.maybe_question||[]);
-  const idle = [...filt(buckets.idle||[]), ...filt(buckets.agent_should_respond||[])];
+  const buckets = data.buckets;
+  const urgent = applySort(filt(buckets.awaiting||[]));
+  const likely = applySort(filt(buckets.likely_question||[]));
+  const maybe = applySort(filt(buckets.maybe_question||[]));
+  const idle = applySort([...filt(buckets.idle||[]), ...filt(buckets.agent_should_respond||[])]);
 
-  document.getElementById('urgent').innerHTML = urgent.map(r=>renderCard(r,'urgent')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none — nothing explicitly blocked.</div>';
-  document.getElementById('likely').innerHTML = likely.map(r=>renderCard(r,'high')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
-  document.getElementById('maybe').innerHTML  = maybe.map(r=>renderCard(r,'medium')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
-  document.getElementById('idle').innerHTML   = idle.map(r=>renderCard(r,'idle')).join('') || '<div style="padding:8px 4px;color:var(--mute);">none</div>';
+  document.getElementById('urgent').innerHTML = urgent.map(r=>renderCard(r,'urgent')).join('') || '<div class="muted" style="padding:6px;">none — nothing explicitly blocked.</div>';
+  document.getElementById('likely').innerHTML = likely.map(r=>renderCard(r,'high')).join('') || '<div class="muted" style="padding:6px;">none</div>';
+  document.getElementById('maybe').innerHTML  = maybe.map(r=>renderCard(r,'medium')).join('') || '<div class="muted" style="padding:6px;">none</div>';
+  document.getElementById('idle').innerHTML   = idle.map(r=>renderCard(r,'idle')).join('') || '<div class="muted" style="padding:6px;">none</div>';
 
-  // KPIs
-  const kpis = document.getElementById('kpis');
-  kpis.innerHTML = `
-    <div class="kpi urgent"><div class="l">awaiting</div><div class="v">${urgent.length}</div></div>
-    <div class="kpi high"><div class="l">likely 🔥</div><div class="v">${likely.length}</div></div>
-    <div class="kpi medium"><div class="l">maybe 💭</div><div class="v">${maybe.length}</div></div>
-    <div class="kpi idle"><div class="l">idle ✅</div><div class="v">${idle.length}</div></div>
-    <div class="kpi"><div class="l">total active</div><div class="v">${urgent.length+likely.length+maybe.length+idle.length}</div></div>
+  document.getElementById('cnt-urgent').textContent = `(${urgent.length})`;
+  document.getElementById('cnt-likely').textContent = `(${likely.length})`;
+  document.getElementById('cnt-maybe').textContent = `(${maybe.length})`;
+  document.getElementById('cnt-idle').textContent = `(${idle.length})`;
+
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi urgent"><div class="v">${urgent.length}</div><div class="l">awaiting</div></div>
+    <div class="kpi high"><div class="v">${likely.length}</div><div class="l">likely 🔥</div></div>
+    <div class="kpi medium"><div class="v">${maybe.length}</div><div class="l">maybe 💭</div></div>
+    <div class="kpi idle"><div class="v">${idle.length}</div><div class="l">idle ✅</div></div>
   `;
+  updateBatchBar();
 }
 
-// Machines
-const machinesDiv = document.getElementById('machines');
+// ----- staging / batch -----
+function toggleReply(usid){
+  const el = document.getElementById('reply-'+usid);
+  el.classList.toggle('open');
+  if(el.classList.contains('open')){
+    setTimeout(()=>document.getElementById('ta-'+usid).focus(), 50);
+  }
+}
+function stage(usid,name,account,asid){
+  const text = document.getElementById('ta-'+usid).value.trim();
+  if(!text){ flash('write something first'); return; }
+  staged.set(usid, {usid, asid, name, account, text});
+  render();
+  flash('staged ✓');
+}
+function unstage(usid){
+  staged.delete(usid);
+  render();
+}
+function clearStaged(){
+  staged.clear();
+  render();
+  flash('cleared');
+}
+function updateBatchBar(){
+  const n = staged.size;
+  const bar = document.getElementById('batchbar');
+  document.getElementById('batchCount').textContent = `${n} staged`;
+  document.getElementById('batchCount2').textContent = n;
+  if(n>0) bar.classList.add('open'); else bar.classList.remove('open');
+}
+
+// ----- send: there are two paths -----
+// (1) Direct: if user pastes a PAT into localStorage as 'omnara_pat_<account>',
+//     we call POST /api/v1/user-sessions/{usid}/agent-sessions/{asid}/messages directly.
+// (2) Fallback: print a curl/CLI block and ask Steve to run it.
+function getPat(account){
+  return localStorage.getItem('omnara_pat_'+account);
+}
+async function postMessage(account, usid, asid, text){
+  const pat = getPat(account);
+  if(!pat){
+    return {ok:false, error:'no_pat', cli:`omnara-mgr send ${usid} ${JSON.stringify(text)}  # @${account}`};
+  }
+  const body = JSON.stringify({text});
+  const r = await fetch(`https://api.omnara.com/api/v1/user-sessions/${usid}/agent-sessions/${asid}/messages`, {
+    method:'POST',
+    headers:{'Authorization':'Bearer '+pat,'Content-Type':'application/json'},
+    body
+  });
+  if(r.ok){
+    const j = await r.json();
+    return {ok:true, message_id:j.message_id};
+  }
+  return {ok:false, error:`HTTP ${r.status}`, body:await r.text()};
+}
+async function sendOne(usid, asidArg){
+  let entry = staged.get(usid);
+  if(!entry){
+    // staging on the fly from the textarea
+    const ta = document.getElementById('ta-'+usid);
+    if(!ta || !ta.value.trim()){ flash('empty'); return; }
+    const card = ta.closest('.card');
+    // Need account+asid; extract from data
+    const all = [].concat(...Object.values(data.buckets));
+    const r = all.find(x=>x.usid===usid);
+    if(!r){ flash('row not found'); return; }
+    entry = {usid, asid: r.asid, name: r.name, account: r.account||'personal', text: ta.value.trim()};
+  }
+  const text = entry.text.startsWith('[from ')?entry.text:`[from omnara-manage] ${entry.text}`;
+  const out = await postMessage(entry.account, entry.usid, entry.asid, text);
+  if(out.ok){
+    flash('sent ✓');
+    staged.delete(usid);
+    render();
+  } else if(out.error==='no_pat'){
+    // Just stage and ask Steve to use the bottom button
+    staged.set(usid, entry);
+    render();
+    flash('staged (no browser PAT — use Copy/Send buttons below)');
+  } else {
+    flash('FAIL: '+out.error);
+  }
+}
+async function sendAllStaged(){
+  if(staged.size===0){ flash('nothing staged'); return; }
+  const list = [...staged.values()];
+  const results = [];
+  document.getElementById('batchOut').style.display='block';
+  document.getElementById('batchOut').textContent = `Sending ${list.length}...`;
+  let ok=0, fail=0, missing=0;
+  for(const e of list){
+    const text = e.text.startsWith('[from ')?e.text:`[from omnara-manage] ${e.text}`;
+    const r = await postMessage(e.account, e.usid, e.asid, text);
+    results.push({...e, result:r});
+    if(r.ok){ ok++; staged.delete(e.usid); }
+    else if(r.error==='no_pat') missing++;
+    else fail++;
+    document.getElementById('batchOut').textContent = `${ok} sent · ${fail} failed · ${missing} missing PAT (${list.length} total)`;
+  }
+  render();
+  if(missing>0){
+    // Copy CLI commands to clipboard
+    const cli = results.filter(r=>r.result.error==='no_pat').map(r=>r.result.cli).join('\n');
+    if(cli){
+      await navigator.clipboard.writeText(cli);
+      flash(`${ok} sent, ${missing} CLI commands copied`);
+    }
+  } else {
+    flash(`${ok} sent ✓`);
+  }
+}
+async function copyBatchAsCommand(){
+  if(staged.size===0){ flash('nothing staged'); return; }
+  // Pure CLI batch: a shell script Steve can paste anywhere
+  const lines = [...staged.values()].map(e=>{
+    const text = e.text.replace(/'/g,"'\\''");
+    return `omnara-mgr send ${e.usid} '${text}'  # @${e.account} — ${e.name}`;
+  });
+  const block = '#!/bin/bash\n# Batch reply for ' + staged.size + ' Omnara sessions\nset -e\n\n' + lines.join('\n');
+  await navigator.clipboard.writeText(block);
+  flash(`${staged.size} commands copied 📋`);
+  document.getElementById('batchOut').style.display='block';
+  document.getElementById('batchOut').textContent = block;
+}
+
+function flash(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(window._toastT);
+  window._toastT = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+// keyboard shortcut
+document.addEventListener('keydown', e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==='Enter'){
+    const ta = document.activeElement;
+    if(ta && ta.tagName==='TEXTAREA' && ta.id.startsWith('ta-')){
+      const usid = ta.id.slice(3);
+      const card = ta.closest('.card');
+      const all = [].concat(...Object.values(data.buckets));
+      const r = all.find(x=>x.usid===usid);
+      if(r){ stage(usid, r.name||'', r.account||'personal', r.asid); }
+    }
+  }
+});
+
+// machines
 const ms = (data.machines && data.machines.machines) || [];
-machinesDiv.innerHTML = ms.map(m=>{
+document.getElementById('machineCount').textContent = ms.length;
+document.getElementById('machines').innerHTML = ms.map(m=>{
   const cls = m.status==='ONLINE' ? 'online' : 'offline';
   const flag = m.status==='ONLINE' ? '🟢' : '⚫';
-  return `<div class="machine ${cls}"><div class="h">${flag} ${esc(m.hostname||'?')}</div><div class="s">daemon ${m.daemon_version||'?'} · seen ${(m.last_seen_at||'?').slice(0,19)}</div></div>`;
+  return `<div class="machine ${cls}"><div class="h">${flag} ${esc(m.hostname||'?')}</div><div class="s">daemon ${m.daemon_version||'?'} · ${(m.last_seen_at||'?').slice(0,19)}</div></div>`;
 }).join('');
 
 renderAcctBar();

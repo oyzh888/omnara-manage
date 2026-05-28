@@ -136,13 +136,20 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
         hits.extend(h)
         if age is not None:
             if age < 30:
-                score += 15
+                score += 20
             elif age < 60:
-                score += 8
+                score += 12
             elif age < 60 * 4:
-                score += 3
+                score += 5
+            elif age < 60 * 12:
+                score += 2
     elif last_sender == "user":
         score = max(0, score - 50)
+
+    # Pinned bonus — Omnara users only pin sessions they actively care about
+    if summary.get("pinned"):
+        score += 25
+        hits.insert(0, "📌pinned")
 
     return {
         **summary,
