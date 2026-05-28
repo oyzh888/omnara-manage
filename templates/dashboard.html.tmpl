@@ -317,6 +317,7 @@ function renderCard(r, kind){
       <div class="row1">
         <div class="nm">${pinIcon}${esc(r.name||'(unnamed)')}</div>
         ${acctTag}
+        ${r.has_interaction_request ? '<span class="tag urgent">🔴 BLOCKED on you</span>' : ''}
         <span class="score-badge">${r.score}</span>
         <span class="tag ${kind}">${kind}</span>
         <span class="meta">${esc(r.age_str)} ago${branchHTML}</span>

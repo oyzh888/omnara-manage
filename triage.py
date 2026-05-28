@@ -6,6 +6,7 @@ Message fetching parallelized via ThreadPoolExecutor.
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -99,13 +100,12 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
     age = _age_min(summary["last_msg"] or summary["created_at"], now)
     pinned = bool(summary.get("pinned"))
 
-    # Filtering: pinned bypasses all age/disconnect filters.
+    # Filtering. Don't drop WORKING — a session can be WORKING and still have an open
+    # interaction_request waiting on the user (Omnara doesn't auto-flip work_status).
     if not pinned:
-        if work == "WORKING":
-            return None
         if conn == "DISCONNECTED" and (age is None or age > 60 * 24 * 7):
             return None
-        if age is None or age > 60 * 24 * 7:  # was 48h, now 7d for non-pinned
+        if age is None or age > 60 * 24 * 7:
             return None
 
     # Peek last messages — grab BOTH the most recent agent reply AND the prior user message,
@@ -114,6 +114,8 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
     last_text = None
     last_sender = None
     prev_user_text = None
+    has_interaction_request = False  # explicit "I'm blocking on user input" frame
+    interaction_request_text = None
     try:
         # API returns ascending-by-created_at within a page; page size 200; before_id pagination.
         # Walk pages backward up to 5 pages (1000 messages) until we find both a user msg and an agent text.
@@ -122,6 +124,29 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
             page = c.get_messages(summary["usid"], summary["asid"], limit=200, before_id=before_id)
             if not page:
                 break
+            # Check the most-recent frames (last 30) for an unanswered interaction_request.
+            # If the LAST frame from the agent is interaction_request and no user message has come
+            # after it, the session is blocked on Steve.
+            if _page == 0:
+                tail = page[-30:]
+                # Walk newest -> oldest; first user text after an IR means it was answered.
+                for m in reversed(tail):
+                    content = (m.get("payload") or {}).get("content") or {}
+                    t = content.get("type")
+                    sender = (m.get("sender") or {}).get("kind")
+                    if t == "interaction_request" and sender == "agent_session":
+                        has_interaction_request = True
+                        # Try to extract a question text from the IR payload
+                        interaction_request_text = (
+                            content.get("text")
+                            or content.get("question")
+                            or content.get("message")
+                            or json.dumps(content, ensure_ascii=False)[:500]
+                        ) if isinstance(content, dict) else None
+                        break
+                    if t == "text" and sender == "user" and (content.get("text") or "").strip():
+                        # User already replied after any IR — not blocked
+                        break
             for m in reversed(page):
                 content = (m.get("payload") or {}).get("content") or {}
                 if content.get("type") != "text":
@@ -153,8 +178,8 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
             return None
 
     base = 0
-    if work == "AWAITING_INPUT":
-        base = 100
+    if work == "AWAITING_INPUT" or has_interaction_request:
+        base = 100  # explicit blocked-on-user signal
     elif work == "IDLE" and age is not None and age < 60 * 4:
         base = 20
     elif work == "IDLE" and age is not None and age < 60 * 24:
@@ -162,6 +187,8 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
 
     score = base
     hits: list[str] = []
+    if has_interaction_request:
+        hits.insert(0, "🔴interaction_request")
     if last_sender == "agent_session":
         score += 10
         q, h = detect_question(last_text)
@@ -177,7 +204,10 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
             elif age < 60 * 12:
                 score += 2
     elif last_sender == "user":
-        score = max(0, score - 50)
+        # Don't penalize WORKING-with-IR sessions just because the very last text frame is the user's
+        # initial prompt (the agent then went off doing tool calls and finally raised an IR).
+        if not has_interaction_request:
+            score = max(0, score - 50)
 
     # Pinned bonus — Omnara users only pin sessions they actively care about
     if summary.get("pinned"):
@@ -191,13 +221,15 @@ def score_session(c: OmnaraClient, s: dict, now: datetime, peek_limit: int = 5) 
         "last_text": last_text or "",
         "last_sender": last_sender,
         "prev_user_text": prev_user_text or "",
+        "has_interaction_request": has_interaction_request,
+        "interaction_request_text": interaction_request_text,
         "score": score,
         "hits": hits[:8],
     }
 
 
 def bucket_of(rec: dict) -> str:
-    if rec["work_status"] == "AWAITING_INPUT":
+    if rec["work_status"] == "AWAITING_INPUT" or rec.get("has_interaction_request"):
         return "awaiting"
     if rec["score"] >= 30:
         return "likely_question"
